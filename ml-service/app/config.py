@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
-import torch
 import os
 
 
@@ -39,9 +38,11 @@ class Settings(BaseSettings):
     @property
     def device(self) -> str:
         """Returns 'cuda' if a GPU is available and FORCE_CPU is not set, else 'cpu'."""
+        import torch  # lazy import — avoids slow torch init at config load time
         if self.force_cpu:
             return "cpu"
         return "cuda" if torch.cuda.is_available() else "cpu"
+
 
 
 @lru_cache()

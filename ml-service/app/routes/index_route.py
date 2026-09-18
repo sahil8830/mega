@@ -8,8 +8,6 @@ GET /api/videos/:id/status to detect completion.
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
-from app.services.indexing_pipeline import run_indexing_pipeline
-
 router = APIRouter()
 
 
@@ -25,7 +23,8 @@ class IndexResponse(BaseModel):
 
 
 async def _pipeline_task(video_id: str, video_filename: str):
-    """Background task wrapper — errors are caught inside run_indexing_pipeline."""
+    """Background task wrapper — imports pipeline lazily to keep server startup fast."""
+    from app.services.indexing_pipeline import run_indexing_pipeline
     await run_indexing_pipeline(video_id=video_id, video_filename=video_filename)
 
 

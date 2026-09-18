@@ -15,24 +15,23 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    # Ensure FAISS index directory exists
+    # Ensure storage directories exist
     os.makedirs(settings.faiss_index_path, exist_ok=True)
+    os.makedirs(settings.video_storage_path, exist_ok=True)
 
-    # Pre-load FAISS indices from disk (if they exist)
-    from app.services.faiss_manager import get_faiss_manager
-    faiss_mgr = get_faiss_manager()
-
-    print(f"🚀 ML Service starting up")
-    print(f"   Device   : {settings.device.upper()}")
-    print(f"   CLIP     : {settings.clip_model_name} ({settings.clip_pretrained})")
-    print(f"   Whisper  : {settings.whisper_model_size}")
-    print(f"   FAISS dir: {settings.faiss_index_path}")
-    print(f"   MongoDB  : {settings.mongodb_uri}")
-    print(f"   FAISS    : {faiss_mgr.stats()}")
+    print("==> ML Service ready")
+    print(f"    Device   : {settings.device.upper()}")
+    print(f"    CLIP     : {settings.clip_model_name} ({settings.clip_pretrained})")
+    print(f"    Whisper  : {settings.whisper_model_size}")
+    print(f"    FAISS dir: {settings.faiss_index_path}")
+    print(f"    MongoDB  : {settings.mongodb_uri}")
+    print("    Models load lazily on first request")
 
     yield  # Application is running
 
-    print("🛑 ML Service shutting down")
+    print("==> ML Service shutting down")
+
+
 
 
 
