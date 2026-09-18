@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: mega_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: megaadmin
+      MONGO_INITDB_ROOT_PASSWORD: megapassword
+      MONGO_INITDB_DATABASE: mega
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - mega_network
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: mega_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - mega_network
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  mega_network:
+    driver: bridge

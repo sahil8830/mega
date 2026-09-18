@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.so
+
+# Model weights & large files
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+*.pkl
+*.h5
+*.ckpt
+ml-service/models/
+
+# FAISS indices
+*.index
+ml-service/faiss/
+
+# Python env files
+ml-service/.env
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+package-lock.json
+yarn.lock
+
+# Node env files
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# Build output
+frontend/dist/
+frontend/build/
+backend/dist/
+
+# Logs
+logs/
+*.log
+
+# Video storage (ignore actual files, keep folder)
+backend/storage/videos/*
+!backend/storage/videos/.gitkeep
+
+# Data / datasets
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Docker volumes
+.docker/

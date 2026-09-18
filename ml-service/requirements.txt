@@ -1,0 +1,47 @@
+# ─── Web Framework ────────────────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# ─── ML / Deep Learning ───────────────────────────────────────────────────────
+# IMPORTANT: Install torch + torchvision from PyTorch's official CPU index.
+# Do NOT install from PyPI — the CPU wheels there are missing C++ extensions.
+# Command: pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0
+torchvision==0.21.0
+open_clip_torch==2.26.1
+openai-whisper==20240930
+
+# ─── OCR ──────────────────────────────────────────────────────────────────────
+# paddlepaddle 2.x does not support Python 3.12 or numpy 2.x — use 3.x
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+
+# ─── Vector Search ────────────────────────────────────────────────────────────
+# faiss-cpu works everywhere; GPU acceleration is handled programmatically at runtime
+faiss-cpu==1.9.0
+
+# ─── Hugging Face / NLP ───────────────────────────────────────────────────────
+transformers==4.44.2
+accelerate==0.34.2
+sentencepiece==0.2.0
+
+# ─── Computer Vision / Video ──────────────────────────────────────────────────
+opencv-python-headless==4.10.0.84
+ffmpeg-python==0.2.0
+
+# ─── Database ─────────────────────────────────────────────────────────────────
+pymongo==4.8.0
+motor==3.5.1
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1
+# numpy and scipy: let pip resolve compatible versions (scipy<1.15.3 supports numpy>=1.26)
+numpy>=1.26.0
+scipy>=1.13.0
+scikit-learn==1.6.1
+Pillow==10.4.0
+tqdm==4.66.5
+httpx==0.27.2
+pydantic==2.8.2
+pydantic-settings==2.4.0

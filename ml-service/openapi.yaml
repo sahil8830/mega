@@ -1,0 +1,317 @@
+openapi: "3.0.3"
+info:
+  title: Mega ML Service
+  description: |
+    AI/ML backend for Universal Semantic Video Search & Moment Retrieval.
+
+    Handles:
+    - CLIP visual embeddings
+    - Whisper ASR (speech-to-text)
+    - PaddleOCR (on-screen text extraction)
+    - FAISS indexing (visual / speech / OCR indices)
+    - GQE-style query expansion + K-Means clustering
+    - Dynamic modality weighting (MLP/attention)
+    - Temporal localization + confidence-gated refinement
+    - Answerability detection
+  version: "0.1.0"
+
+servers:
+  - url: http://localhost:8001
+    description: Local development
+
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Indexing
+    description: Offline video indexing pipeline (Phase 1)
+  - name: Search
+    description: Online query pipeline (Phase 2–5)
+  - name: Query
+    description: Query expansion utilities (Phase 2)
+
+paths:
+  /ml/health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      operationId: health_check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /ml/index:
+    post:
+      tags: [Indexing]
+      summary: Trigger offline indexing for a video
+      operationId: index_video
+      description: |
+        Runs the full offline indexing pipeline for a single video:
+        1. Temporal segmentation (FFmpeg, 10s chunks with 2s overlap)
+        2. Representative frame sampling (1–3 frames per chunk, OpenCV)
+        3. Visual embedding extraction (CLIP ViT-B/32 or ViT-L/14, mean-pooled)
+        4. Speech transcription (Whisper base/small, word-level timestamps)
+        5. OCR text extraction (PaddleOCR per sampled frame)
+        6. FAISS index update + MongoDB segment storage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IndexRequest"
+      responses:
+        "200":
+          description: Indexing job accepted or completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /ml/search:
+    post:
+      tags: [Search]
+      summary: Run full online query pipeline
+      operationId: search
+      description: |
+        Executes the full online query pipeline:
+        1. GQE query expansion → K-Means clustering → 3 representative embeddings
+        2. FAISS retrieval across visual, speech, OCR indices
+        3. Answerability detection (3-signal cheap-first strategy)
+        4. Dynamic modality weighting (MLP: query_emb → [w_v, w_s, w_o])
+        5. Multimodal fusion scoring + ranking
+        6. Temporal localization (coarse chunk boundaries)
+        7. Confidence-gated refinement (fine-grained re-segmentation if confidence < τ)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: Search results with evidence breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /ml/query/expand:
+    post:
+      tags: [Query]
+      summary: GQE-style query expansion with K-Means clustering
+      operationId: expand_query
+      description: |
+        Generates diverse query variants using an LLM (flan-t5-base locally or GPT-3.5 via API),
+        then applies K-Means (K=3) to select representative variants.
+        Results are cached in MongoDB keyed by query hash.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueryExpandRequest"
+      responses:
+        "200":
+          description: Expanded and clustered query variants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryExpandResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        device:
+          type: string
+          enum: [cpu, cuda]
+          example: cpu
+        cuda_available:
+          type: boolean
+        cuda_device_name:
+          type: string
+          nullable: true
+          example: "NVIDIA GeForce RTX 3080"
+        clip_model:
+          type: string
+          example: ViT-B-32
+        whisper_model:
+          type: string
+          example: base
+
+    IndexRequest:
+      type: object
+      required: [video_id, video_filename]
+      properties:
+        video_id:
+          type: string
+          description: MongoDB ObjectId of the video document
+          example: "64f1a2b3c4d5e6f7a8b9c0d1"
+        video_filename:
+          type: string
+          description: Filename in the storage/videos directory
+          example: "lecture_gradient_descent.mp4"
+
+    IndexResponse:
+      type: object
+      properties:
+        video_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, indexing, indexed, failed, stub]
+        message:
+          type: string
+
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: Natural language search query
+          example: "find where the professor explains gradient descent"
+        top_k:
+          type: integer
+          default: 5
+          description: Number of top results to return
+
+    SearchResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, no_match, stub]
+        message:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+
+    SearchResult:
+      type: object
+      properties:
+        video_id:
+          type: string
+        video_title:
+          type: string
+        start_time:
+          type: number
+          format: float
+          description: Start timestamp in seconds
+          example: 142.3
+        end_time:
+          type: number
+          format: float
+          description: End timestamp in seconds
+          example: 158.7
+        answerability_score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Probability that a relevant moment exists
+          example: 0.88
+        localization_confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Confidence in the predicted timestamp window
+          example: 0.72
+        refinement_triggered:
+          type: boolean
+          description: Whether expensive fine-grained refinement was triggered
+        evidence:
+          $ref: "#/components/schemas/Evidence"
+
+    Evidence:
+      type: object
+      description: Per-modality weights and similarity scores for explainability
+      properties:
+        visual_weight:
+          type: number
+          format: float
+          example: 0.55
+        speech_weight:
+          type: number
+          format: float
+          example: 0.35
+        ocr_weight:
+          type: number
+          format: float
+          example: 0.10
+        visual_similarity:
+          type: number
+          format: float
+          example: 0.81
+        speech_similarity:
+          type: number
+          format: float
+          example: 0.74
+        ocr_similarity:
+          type: number
+          format: float
+          example: 0.22
+
+    QueryExpandRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          example: "find where the professor explains gradient descent"
+        num_variants:
+          type: integer
+          default: 8
+          description: Number of variants for the LLM to generate before clustering
+
+    QueryExpandResponse:
+      type: object
+      properties:
+        original_query:
+          type: string
+        all_variants:
+          type: array
+          items:
+            type: string
+          description: All LLM-generated variants
+        representative_variants:
+          type: array
+          items:
+            type: string
+          description: K=3 cluster representatives used for FAISS retrieval
+        cached:
+          type: boolean
+          description: Whether this result was served from MongoDB cache
+
+    ValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+
+  responses:
+    ValidationError:
+      description: Request validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationError"
