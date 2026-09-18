@@ -2,52 +2,57 @@ import mongoose from "mongoose";
 import crypto from "crypto";
 
 /**
- * Query — cached GQE expansion results, keyed by query hash.
+ * Query — log of each user search + GQE expansion results.
  *
- * Avoids redundant LLM API calls for identical or near-identical queries.
- * queryHash = MD5(rawQuery.toLowerCase().trim())
+ * Acts as both a search log and a GQE cache (keyed by queryHash).
+ * queryHash = SHA-256(rawQuery.toLowerCase().trim())
  */
 const querySchema = new mongoose.Schema(
   {
-    rawQuery: {
-      type: String,
-      required: true,
-    },
-    /**
-     * MD5 hash of normalized query for fast lookup.
-     * Normalized = lowercase + trimmed.
-     */
+    rawQuery:       { type: String, required: true },
+
+    /** SHA-256 hash of normalized query — used for GQE cache lookup */
     queryHash: {
       type: String,
-      required: true,
-      unique: true,
       index: true,
     },
+
     /** All LLM-generated variants (before clustering) */
     expandedVariants: [String],
+
     /** K-Means selected representative variants (K=3) */
-    representativeVariants: [String],
-    /** Model used for expansion: "flan-t5-base" | "gpt-3.5-turbo" */
-    expansionModel: {
+    representativeQueries: [String],
+
+    /** Predicted dominant modality from classifier */
+    predictedModality: {
       type: String,
-      default: "flan-t5-base",
+      enum: ["visual", "speech", "ocr", "all"],
+      default: "all",
     },
-    cachedAt: {
-      type: Date,
-      default: Date.now,
+
+    /** Fixed-weight fusion weights used for this query */
+    modalityWeights: {
+      visual: { type: Number, default: 0.33 },
+      speech: { type: Number, default: 0.33 },
+      ocr:    { type: Number, default: 0.34 },
     },
+
+    resultCount:  { type: Number, default: 0 },
+    searchedBy:   { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
+    /** Model used for expansion */
+    expansionModel: { type: String, default: "flan-t5-base" },
   },
   { timestamps: true }
 );
 
-/**
- * Static helper: compute query hash
- */
+/** Static helper: compute query hash */
 querySchema.statics.computeHash = function (rawQuery) {
   return crypto
-    .createHash("md5")
+    .createHash("sha256")
     .update(rawQuery.toLowerCase().trim())
     .digest("hex");
 };
 
 export default mongoose.model("Query", querySchema);
+

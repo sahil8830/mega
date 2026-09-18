@@ -1,39 +1,61 @@
+"""
+POST /ml/query/expand — GQE-style query expansion.
+
+Takes a raw user query and returns:
+  - N semantically diverse variants (flan-t5-base)
+  - 3 cluster-representative queries (K-Means on CLIP embeddings)
+  - Pre-computed CLIP embeddings for the 3 representatives
+
+The representatives + their embeddings are passed directly to POST /ml/search
+to avoid re-encoding them.
+"""
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List
 
 router = APIRouter()
 
 
 class QueryExpandRequest(BaseModel):
-    query: str
-    num_variants: int = 8  # LLM generates this many; K-Means reduces to 3 representatives
+    query: str = Field(..., min_length=1, max_length=512, description="Raw user query")
 
 
 class QueryExpandResponse(BaseModel):
-    original_query: str
-    all_variants: list[str]
-    representative_variants: list[str]  # K-Means cluster centroids (K=3)
-    cached: bool
+    original: str
+    variants: List[str]
+    representatives: List[str]
+    representative_embeddings: List[List[float]]   # shape (K, 512)
+    from_cache: bool
+    modality: str
+    weights: dict
 
 
 @router.post("/ml/query/expand", response_model=QueryExpandResponse, tags=["Query"])
-async def expand_query(request: QueryExpandRequest):
+async def expand_query_endpoint(request: QueryExpandRequest):
     """
-    GQE-style query expansion followed by K-Means clustering.
+    Expand a raw query into semantically diverse variants using flan-t5-base,
+    then cluster to 3 representative queries and classify modality.
 
-    Pipeline (Phase 2 implementation):
-      1. Use flan-t5-base (local) or GPT-3.5 (API) to generate `num_variants` diverse query variants
-      2. Encode all variants with CLIP text encoder
-      3. Apply K-Means (K=3) clustering on variant embeddings
-      4. Select one representative (closest to centroid) per cluster
-      5. Cache result in MongoDB keyed by query hash
+    - Variants: 8 paraphrases from the LLM
+    - Representatives: 3 K-Means cluster centroids for efficient FAISS search
+    - Modality: predicted dominant modality (visual / speech / ocr / all)
+    - from_cache: true if result was served from MongoDB cache
 
-    Currently returns a stub response — full implementation in Phase 2.
+    **First call** may take 30-60 seconds (model download + inference).
+    **Subsequent calls** with the same query are instant (MongoDB cache hit).
     """
-    # TODO (Phase 2): implement GQE expansion + K-Means clustering
+    from app.services.query_expander import expand_query
+    from app.services.modality_classifier import classify_modality
+
+    result = await expand_query(request.query)
+    modality_info = classify_modality(request.query)
+
     return QueryExpandResponse(
-        original_query=request.query,
-        all_variants=[],
-        representative_variants=[],
-        cached=False,
+        original=result["original"],
+        variants=result["variants"],
+        representatives=result["representatives"],
+        representative_embeddings=result["representative_embeddings"],
+        from_cache=result["from_cache"],
+        modality=modality_info["modality"],
+        weights=modality_info["weights"],
     )

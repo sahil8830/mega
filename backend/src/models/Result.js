@@ -64,6 +64,9 @@ const resultSchema = new mongoose.Schema(
       default: null,
     },
 
+    /** Fixed-weight fused retrieval score */
+    fusedScore: { type: Number, default: 0 },
+
     /** Rank within the result list (1 = top result) */
     rank: { type: Number, default: 1 },
   },
