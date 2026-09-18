@@ -28,6 +28,10 @@ build/
 *.ckpt
 ml-service/models/
 
+# Temporary extracted frames (Phase 1 indexing)
+ml-service/frames/
+
+
 # FAISS indices
 *.index
 ml-service/faiss/

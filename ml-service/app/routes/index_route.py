@@ -1,5 +1,14 @@
-from fastapi import APIRouter
+"""
+POST /ml/index — Trigger offline indexing pipeline for a video.
+
+The pipeline is run as a FastAPI BackgroundTask so the HTTP response
+returns immediately with status="indexing". The BullMQ worker polls
+GET /api/videos/:id/status to detect completion.
+"""
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
+
+from app.services.indexing_pipeline import run_indexing_pipeline
 
 router = APIRouter()
 
@@ -15,24 +24,35 @@ class IndexResponse(BaseModel):
     message: str
 
 
+async def _pipeline_task(video_id: str, video_filename: str):
+    """Background task wrapper — errors are caught inside run_indexing_pipeline."""
+    await run_indexing_pipeline(video_id=video_id, video_filename=video_filename)
+
+
 @router.post("/ml/index", response_model=IndexResponse, tags=["Indexing"])
-async def index_video(request: IndexRequest):
+async def index_video(request: IndexRequest, background_tasks: BackgroundTasks):
     """
     Trigger the offline indexing pipeline for a single video.
 
-    Pipeline (Phase 1 implementation):
-      1. Temporal segmentation (FFmpeg)
-      2. Representative frame sampling (OpenCV)
-      3. Visual embedding extraction (CLIP)
-      4. Speech transcription (Whisper)
-      5. OCR text extraction (PaddleOCR)
-      6. FAISS index update + MongoDB segment storage
+    Returns immediately with status='indexing'.
+    Poll GET /api/videos/:id/status on the Node backend to check completion.
 
-    Currently returns a stub response — full implementation in Phase 1.
+    Pipeline steps (runs in background):
+      1. Temporal segmentation (ffprobe + OpenCV)
+      2. Whisper ASR transcription
+      3. Per-chunk: CLIP visual embedding + speech embedding + OCR + FAISS
+      4. Save FAISS indices to disk
+      5. Cleanup temp frames
+      6. Update MongoDB Video status → 'indexed'
     """
-    # TODO (Phase 1): implement full indexing pipeline
+    background_tasks.add_task(
+        _pipeline_task,
+        video_id=request.video_id,
+        video_filename=request.video_filename,
+    )
+
     return IndexResponse(
         video_id=request.video_id,
-        status="stub",
-        message="Indexing pipeline not yet implemented — Phase 1 work.",
+        status="indexing",
+        message="Indexing pipeline started in background. Poll /api/videos/:id/status for completion.",
     )
