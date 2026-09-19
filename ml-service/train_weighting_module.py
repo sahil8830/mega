@@ -1,0 +1,313 @@
+"""
+Training Script — Modality Weighting MLP (Phase 3, Step 3.2).
+
+Training Strategy (without QVHighlights dataset yet):
+  1. SYNTHETIC DATA PHASE (runs immediately):
+     - Generate random CLIP-like embeddings paired with synthetic modality labels
+     - Gives the network a warm start
+     - Label generation rule: whichever modality has the highest raw FAISS score
+       from the "oracle" perspective gets label weight 1.0 (hard label),
+       or use temperature-softened soft labels
+
+  2. REAL DATA PHASE (runs if MongoDB has indexed segments):
+     - Load all Segment documents from MongoDB
+     - For each segment: query embedding = mean of visual/speech/ocr embeddings
+       (using CLIP text encoder on transcript + OCR text)
+     - Label: determined by which modality embedding is closest to the segment
+       (oracle: argmax of [visual_sim, speech_sim, ocr_sim] for matched pairs)
+
+Loss:
+  - CrossEntropy on hard modality label
+  - KL divergence on soft modality label distribution (temperature-scaled)
+  - Both summed with equal weight
+
+Logging:
+  - TensorBoard: loss curve, val loss, per-modality weight distribution
+  - Saved to: ml-service/runs/weighting_mlp/
+
+Usage:
+  cd ml-service
+  venv\\Scripts\\activate
+  python train_weighting_module.py --epochs 50 --lr 1e-3 --batch-size 64
+"""
+import argparse
+import math
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.tensorboard import SummaryWriter
+
+# Ensure app/ is importable
+sys.path.insert(0, str(Path(__file__).parent))
+from app.services.weighting_module import (
+    INPUT_DIM, QUERY_DIM, SCORE_DIM, OUTPUT_DIM,
+    ModalityWeightingMLP, save_model,
+)
+
+RUNS_DIR = Path(__file__).parent / "runs" / "weighting_mlp"
+RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ─── Dataset ──────────────────────────────────────────────────────────────────
+
+class SyntheticModalityDataset(Dataset):
+    """
+    Synthetic dataset for warm-start training.
+
+    Each sample:
+      - query_emb: random L2-normalized 512-dim vector (mimics CLIP query)
+      - modality_scores: [visual_sim, speech_sim, ocr_sim] ~ Dirichlet(1, 1, 1)
+      - soft_label: temperature-softened version of a hard dominant-modality label
+                    where dominant = argmax(modality_scores)
+
+    This teaches the network to push weight toward whichever modality has the
+    highest raw similarity score — a sensible prior that real data will refine.
+    """
+
+    def __init__(self, n_samples: int = 10000, temperature: float = 3.0, seed: int = 42):
+        rng = np.random.default_rng(seed)
+
+        # Random L2-normalized query embeddings
+        raw = rng.standard_normal((n_samples, QUERY_DIM)).astype(np.float32)
+        norms = np.linalg.norm(raw, axis=1, keepdims=True)
+        self.query_embs = raw / norms   # (N, 512)
+
+        # Modality scores: Dirichlet(1,1,1) gives non-negative scores summing to 1
+        self.scores = rng.dirichlet(alpha=[1.0, 1.0, 1.0], size=n_samples).astype(np.float32)
+
+        # Soft labels: temperature-softened argmax
+        # Sharpen toward dominant with temperature scaling: logit = score / T, then softmax
+        logits = self.scores / temperature
+        # Manual softmax
+        e = np.exp(logits - logits.max(axis=1, keepdims=True))
+        self.labels = (e / e.sum(axis=1, keepdims=True)).astype(np.float32)
+
+    def __len__(self):
+        return len(self.query_embs)
+
+    def __getitem__(self, idx):
+        return (
+            torch.from_numpy(self.query_embs[idx]),
+            torch.from_numpy(self.scores[idx]),
+            torch.from_numpy(self.labels[idx]),
+        )
+
+
+class MongoModalityDataset(Dataset):
+    """
+    Real dataset loaded from MongoDB Segment documents.
+    Falls back to empty if MongoDB is unavailable or has no segments.
+    """
+
+    def __init__(self, mongodb_uri: str):
+        self.samples = []
+        try:
+            import asyncio
+            from motor.motor_asyncio import AsyncIOMotorClient
+
+            async def _load():
+                client = AsyncIOMotorClient(mongodb_uri)
+                db_name = mongodb_uri.rsplit("/", 1)[-1].split("?")[0] or "mega"
+                db = client[db_name]
+                docs = await db["segments"].find(
+                    {},
+                    {"visualEmbedding": 1, "speechEmbedding": 1, "ocrEmbedding": 1}
+                ).to_list(None)
+                client.close()
+                return docs
+
+            docs = asyncio.run(_load())
+
+            for doc in docs:
+                v = np.array(doc.get("visualEmbedding", [0.0]*512), dtype=np.float32)
+                s = np.array(doc.get("speechEmbedding", [0.0]*512), dtype=np.float32)
+                o = np.array(doc.get("ocrEmbedding", [0.0]*512), dtype=np.float32)
+
+                # Query embedding = mean-pool of all three modality embeddings
+                q = (v + s + o) / 3.0
+                norm = np.linalg.norm(q)
+                if norm > 1e-8:
+                    q = q / norm
+
+                # Scores = norms (proxy for how "informative" each embedding is)
+                v_norm = float(np.linalg.norm(v))
+                s_norm = float(np.linalg.norm(s))
+                o_norm = float(np.linalg.norm(o))
+                total = v_norm + s_norm + o_norm + 1e-8
+                scores = np.array([v_norm, s_norm, o_norm], dtype=np.float32) / total
+
+                # Soft label: argmax dominant gets 0.7, others share 0.15 each
+                dominant = int(np.argmax(scores))
+                label = np.array([0.15, 0.15, 0.15], dtype=np.float32)
+                label[dominant] = 0.70
+
+                self.samples.append((
+                    torch.from_numpy(q),
+                    torch.from_numpy(scores),
+                    torch.from_numpy(label),
+                ))
+
+            print(f"[MongoDataset] Loaded {len(self.samples)} segments from MongoDB.")
+
+        except Exception as e:
+            print(f"[MongoDataset] Could not load from MongoDB: {e}")
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        return self.samples[idx]
+
+
+# ─── Loss ─────────────────────────────────────────────────────────────────────
+
+class CombinedLoss(nn.Module):
+    """KL divergence from soft labels + CrossEntropy from hard label."""
+
+    def forward(self, logits: torch.Tensor, soft_labels: torch.Tensor) -> torch.Tensor:
+        # KL(soft_labels || predicted_probs)
+        log_probs = F.log_softmax(logits, dim=-1)
+        kl = F.kl_div(log_probs, soft_labels, reduction="batchmean")
+
+        # CrossEntropy from hard label (argmax of soft_labels)
+        hard_labels = soft_labels.argmax(dim=-1)
+        ce = F.cross_entropy(logits, hard_labels)
+
+        return 0.5 * kl + 0.5 * ce
+
+
+# ─── Training ─────────────────────────────────────────────────────────────────
+
+def train(args):
+    device = "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
+    print(f"\n[Train] Device: {device.upper()}")
+    print(f"[Train] Epochs: {args.epochs}  LR: {args.lr}  Batch: {args.batch_size}")
+
+    # ── Build datasets ─────────────────────────────────────────────────────
+    syn_ds = SyntheticModalityDataset(n_samples=args.synthetic_samples)
+    print(f"[Train] Synthetic dataset: {len(syn_ds)} samples")
+
+    # Try to load real data
+    mongo_ds = MongoModalityDataset(args.mongodb_uri)
+    if len(mongo_ds) > 0:
+        from torch.utils.data import ConcatDataset
+        combined = ConcatDataset([syn_ds, mongo_ds])
+        print(f"[Train] Combined dataset: {len(combined)} samples")
+    else:
+        combined = syn_ds
+        print("[Train] Using synthetic-only dataset (no MongoDB segments found)")
+
+    # ── Train/Val split ────────────────────────────────────────────────────
+    val_size = max(1, int(0.1 * len(combined)))
+    train_size = len(combined) - val_size
+    train_ds, val_ds = random_split(combined, [train_size, val_size])
+
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+    val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False)
+
+    # ── Model, optimizer, scheduler ───────────────────────────────────────
+    model = ModalityWeightingMLP(dropout=args.dropout).to(device)
+    criterion = CombinedLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=args.lr * 0.01
+    )
+
+    writer = SummaryWriter(log_dir=str(RUNS_DIR))
+    best_val_loss = float("inf")
+
+    print(f"[Train] Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"[Train] Starting training...\n")
+
+    for epoch in range(1, args.epochs + 1):
+        # ── Train ─────────────────────────────────────────────────────────
+        model.train()
+        train_loss = 0.0
+        for q_emb, scores, labels in train_loader:
+            q_emb  = q_emb.to(device)
+            scores = scores.to(device)
+            labels = labels.to(device)
+
+            optimizer.zero_grad()
+            # Forward: get logits (before softmax) for loss computation
+            x = torch.cat([q_emb, scores], dim=-1)
+            logits = model.net(x)
+            loss = criterion(logits, labels)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+            train_loss += loss.item() * len(q_emb)
+
+        train_loss /= train_size
+        scheduler.step()
+
+        # ── Validate ──────────────────────────────────────────────────────
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for q_emb, scores, labels in val_loader:
+                q_emb  = q_emb.to(device)
+                scores = scores.to(device)
+                labels = labels.to(device)
+                x = torch.cat([q_emb, scores], dim=-1)
+                logits = model.net(x)
+                val_loss += criterion(logits, labels).item() * len(q_emb)
+
+        val_loss /= val_size
+
+        writer.add_scalar("Loss/train", train_loss, epoch)
+        writer.add_scalar("Loss/val", val_loss, epoch)
+        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], epoch)
+
+        # Log mean predicted weights on validation set
+        if epoch % 10 == 0 or epoch == 1:
+            mean_weights = _get_mean_weights(model, val_loader, device)
+            writer.add_scalar("Weights/visual", mean_weights[0], epoch)
+            writer.add_scalar("Weights/speech", mean_weights[1], epoch)
+            writer.add_scalar("Weights/ocr",    mean_weights[2], epoch)
+            print(
+                f"  Epoch {epoch:3d}/{args.epochs} | "
+                f"train={train_loss:.4f} val={val_loss:.4f} | "
+                f"mean_w=[{mean_weights[0]:.3f},{mean_weights[1]:.3f},{mean_weights[2]:.3f}]"
+            )
+
+        # Save best
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_model(model)
+
+    writer.close()
+    print(f"\n[Train] Done! Best val loss: {best_val_loss:.4f}")
+    print(f"[Train] Weights saved to: {model.__class__.__name__}")
+    print(f"[Train] TensorBoard logs: {RUNS_DIR}")
+    print(f"         Run: tensorboard --logdir={RUNS_DIR}")
+
+
+def _get_mean_weights(model, loader, device):
+    all_weights = []
+    for q_emb, scores, _ in loader:
+        w = model(q_emb.to(device), scores.to(device))
+        all_weights.append(w.cpu().detach().numpy())
+    return np.concatenate(all_weights).mean(axis=0)
+
+
+# ─── Entry Point ──────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train Modality Weighting MLP")
+    parser.add_argument("--epochs",            type=int,   default=50)
+    parser.add_argument("--lr",               type=float, default=1e-3)
+    parser.add_argument("--batch-size",       type=int,   default=64)
+    parser.add_argument("--dropout",          type=float, default=0.3)
+    parser.add_argument("--synthetic-samples",type=int,   default=10000)
+    parser.add_argument("--mongodb-uri",      type=str,   default="mongodb://localhost:27017/mega")
+    parser.add_argument("--cpu",              action="store_true")
+    args = parser.parse_args()
+    train(args)

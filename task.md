@@ -1,23 +1,19 @@
-# Phase 2 — Query Expansion, Clustering & Multimodal Fusion (COMPLETE)
+# Phase 3 — Dynamic Query-Conditioned Modality Weighting
 
-## ML Service — New Services
-- [x] `ml-service/app/services/query_expander.py`  (GQE: flan-t5-base variants + K-Means clustering + MongoDB cache)
-- [x] `ml-service/app/services/modality_classifier.py`  (rule-based keyword classifier with conjugated patterns)
-- [x] `ml-service/app/services/retrieval.py`  (multi-query FAISS search + fixed-weight fusion)
+## Step 3.1 — MLP Weighting Module
+- [ ] `ml-service/app/services/weighting_module.py`  (MLP architecture: 512+3 → 64 → 3, softmax output)
 
-## ML Service — Updated Routes
-- [x] `ml-service/app/routes/query_route.py`  (POST /ml/query/expand)
-- [x] `ml-service/app/routes/search_route.py`  (POST /ml/search)
+## Step 3.2 — Training Pipeline
+- [ ] `ml-service/train_weighting_module.py`  (training script: synthetic labels + triplet loss + TensorBoard)
 
-## Backend — Updated
-- [x] `backend/src/routes/search.js`  (GQE expand → ML search → persist Query + Results)
-- [x] `backend/src/models/Query.js`  (expanded schema: modality, weights, resultCount)
-- [x] `backend/src/models/Result.js`  (added fusedScore field)
+## Step 3.3 — Integration
+- [ ] `ml-service/app/services/retrieval.py`  (add `use_dynamic_weights` flag, swap fixed→MLP weights)
+- [ ] `ml-service/app/routes/search_route.py`  (expose `use_dynamic_weights` param + per-modality weight in response)
+
+## Step 3.4 — Ablation
+- [ ] `ml-service/ablation.py`  (evaluate fixed-weight vs dynamic-weight on a test set; print R@1, R@5, mIoU)
 
 ## Verification
-- [x] All Phase 2 module imports: OK
-- [x] Modality classifier smoke test:
-  - "show the red car on the whiteboard" → visual (60/20/20)
-  - "find the code snippet for sorting algorithm" → ocr (100%)
-  - "find where the professor explains gradient descent" → speech (fixed)
-- [ ] End-to-end: query → expand → FAISS → fused results (needs indexed video)
+- [ ] Module loads and produces valid softmax weights from a 512-dim query embedding
+- [ ] Training script runs without error (even on synthetic data)
+- [ ] POST /ml/search with dynamic_weights=true returns MLP-derived weights

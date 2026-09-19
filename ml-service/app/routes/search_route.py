@@ -27,9 +27,14 @@ class SearchRequest(BaseModel):
     modality_weights: Optional[Dict[str, float]] = Field(
         None,
         description="Override fusion weights {visual, speech, ocr}. "
-                    "If omitted, weights are inferred from modality classifier.",
+                    "Ignored when use_dynamic_weights=True.",
     )
     top_k: int = Field(10, ge=1, le=50, description="Number of results to return")
+    use_dynamic_weights: bool = Field(
+        False,
+        description="Use the trained MLP weighting module (Phase 3 dynamic weights). "
+                    "Falls back to fixed weights if model is untrained.",
+    )
 
 
 class SegmentResult(BaseModel):
@@ -53,6 +58,7 @@ class SearchResponse(BaseModel):
     weights: Dict[str, float]
     total_candidates: int
     gqe_applied: bool
+    weighting_mode: str   # "fixed" | "dynamic"
 
 
 @router.post("/ml/search", response_model=SearchResponse, tags=["Search"])
@@ -85,6 +91,7 @@ async def search_endpoint(request: SearchRequest):
         representative_embeddings=rep_embs,
         modality_weights=request.modality_weights,
         top_k=request.top_k,
+        use_dynamic_weights=request.use_dynamic_weights,
     )
 
     return SearchResponse(
@@ -94,4 +101,5 @@ async def search_endpoint(request: SearchRequest):
         weights=result["weights"],
         total_candidates=result["total_candidates"],
         gqe_applied=gqe_applied,
+        weighting_mode=result.get("weighting_mode", "fixed"),
     )
