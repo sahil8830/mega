@@ -1,15 +1,22 @@
 {
-  "name": "frontend",
+  "name": "mega-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.27.0",
+    "zustand": "^5.0.1"
+  },
   "devDependencies": {
-    "typescript": "~6.0.2",
+    "@vitejs/plugin-react": "^4.3.2",
     "vite": "^8.3.0"
   }
 }

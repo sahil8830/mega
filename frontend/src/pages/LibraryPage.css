@@ -1,0 +1,19 @@
+.library-header {
+  display:flex; align-items:flex-end; justify-content:space-between;
+  margin-bottom:36px; flex-wrap:wrap; gap:12px;
+}
+.library-title { font-size:clamp(1.75rem,4vw,2.25rem); font-weight:800; margin-top:6px; }
+.library-count { font-size:.875rem; color:var(--text-3); align-self:flex-end; }
+.library-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(260px,1fr));
+  gap:20px;
+}
+.lib-state {
+  display:flex; flex-direction:column; align-items:center;
+  gap:16px; padding:80px 24px; text-align:center; color:var(--text-2);
+}
+.lib-empty-icon { opacity:.25; margin-bottom:8px; }
+.lib-state-heading { font-size:1.25rem; color:var(--text); }
+.lib-state-msg { font-size:.9rem; }
+.lib-state-msg.error { color:var(--red); }

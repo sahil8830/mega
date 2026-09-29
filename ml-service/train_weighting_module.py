@@ -132,6 +132,8 @@ class QVHighlightsDataset(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx]
 
+
+class MongoModalityDataset(Dataset):
     """
     Real dataset loaded from MongoDB Segment documents.
     Falls back to empty if MongoDB is unavailable or has no segments.
@@ -159,22 +161,19 @@ class QVHighlightsDataset(Dataset):
             for doc in docs:
                 v = np.array(doc.get("visualEmbedding", [0.0]*512), dtype=np.float32)
                 s = np.array(doc.get("speechEmbedding", [0.0]*512), dtype=np.float32)
-                o = np.array(doc.get("ocrEmbedding", [0.0]*512), dtype=np.float32)
+                o = np.array(doc.get("ocrEmbedding",   [0.0]*512), dtype=np.float32)
 
-                # Query embedding = mean-pool of all three modality embeddings
                 q = (v + s + o) / 3.0
                 norm = np.linalg.norm(q)
                 if norm > 1e-8:
                     q = q / norm
 
-                # Scores = norms (proxy for how "informative" each embedding is)
                 v_norm = float(np.linalg.norm(v))
                 s_norm = float(np.linalg.norm(s))
                 o_norm = float(np.linalg.norm(o))
-                total = v_norm + s_norm + o_norm + 1e-8
+                total  = v_norm + s_norm + o_norm + 1e-8
                 scores = np.array([v_norm, s_norm, o_norm], dtype=np.float32) / total
 
-                # Soft label: argmax dominant gets 0.7, others share 0.15 each
                 dominant = int(np.argmax(scores))
                 label = np.array([0.15, 0.15, 0.15], dtype=np.float32)
                 label[dominant] = 0.70

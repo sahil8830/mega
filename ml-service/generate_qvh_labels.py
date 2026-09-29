@@ -1,285 +1,353 @@
 """
-QVHighlights Label Generator for Modality Weighting MLP Training.
+QVHighlights Label Generator — REAL DATA VERSION.
 
-Uses ONLY the files already in moment_detr/data/ — no video download needed:
-  - highlight_train_release.jsonl  : 7,218 query-moment pairs (training labels)
-  - highlight_val_release.jsonl    : 1,550 query-moment pairs (validation)
-  - subs_train.jsonl               : 235,878 ASR subtitle entries (speech signal)
+Uses the pre-extracted CLIP features from moment_detr_features.tar.gz:
+  clip_features/      → (N, 512) CLIP visual embeddings per video (2-sec clips)
+  clip_sub_features/  → subtitle CLIP embeddings
+  clip_text_features/ → pre-computed query CLIP text embeddings
 
-Strategy:
-  For each (query, relevant_windows) in QVHighlights:
-    1. Encode query text with CLIP text encoder → query_emb (512-dim)
-    2. Encode relevant subtitle text for the ground-truth window → speech_emb
-    3. Compute visual_score = cosine_sim(query_emb, speech_emb) as visual proxy
-       (We don't have visual features, so we use the CLIP "visual concept" via text)
-    4. Compute speech_score = how well subtitle text in the GT window matches query
-    5. Compute ocr_score = heuristic based on query keywords (code, text, etc.)
-    6. Build soft label from which modality best explains the ground-truth window
+Ground truth labels come from:
+  highlight_train_release.jsonl → query + relevant_windows (seconds)
 
-Output: ml-service/data/qvhighlights_training_data.npz
-  - query_embs:       (N, 512)  CLIP query embeddings
-  - modality_scores:  (N, 3)    [visual_score, speech_score, ocr_score]
-  - soft_labels:      (N, 3)    Training targets [w_v, w_s, w_o]
-  - meta:             JSON file with query strings for debugging
+Label construction:
+  For each (query, gt_windows) pair:
+    1. Load video's CLIP visual embeddings from clip_features/
+    2. Find which 2-sec clip indices overlap with gt_windows
+    3. Compute visual_score = max cosine_sim(query_emb, gt_clip_embs)
+    4. Load subtitle emb from clip_sub_features/ for the same window
+    5. Compute speech_score = cosine_sim(query_emb, subtitle_emb)
+    6. Compute ocr_score = keyword heuristic
+    7. Build soft label = temperature-softmax([v_score, s_score, o_score])
+
+Output: ml-service/data/qvhighlights_train.npz
+        ml-service/data/qvhighlights_val.npz
 
 Usage:
   cd ml-service
   venv\\Scripts\\activate
-  python generate_qvh_labels.py --max-samples 7000 --batch-size 64
-
-This generates real, grounded training data from 7,218 QVHighlights pairs.
-Estimated time: ~20-40 min on CPU (CLIP text encoding for 7k+ queries).
+  python generate_qvh_labels.py
+  python generate_qvh_labels.py --max-samples 1000   # quick test run
 """
 import argparse
 import json
 import os
 import re
 import sys
-from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-# Paths
-REPO_ROOT = Path(__file__).parent.parent
-DATA_DIR = REPO_ROOT / "moment_detr" / "data"
+# ─── Paths ────────────────────────────────────────────────────────────────────
+REPO_ROOT    = Path(__file__).parent.parent
+MOMENT_DETR  = REPO_ROOT / "moment_detr"
+DATA_DIR     = MOMENT_DETR / "data"
+FEAT_DIR     = MOMENT_DETR / "moment_detr_features" / "features"
+
+CLIP_VISUAL_DIR  = FEAT_DIR / "clip_features"       # (N, 512) visual per video
+CLIP_SUB_DIR     = FEAT_DIR / "clip_sub_features"    # subtitle embeddings
+CLIP_TEXT_DIR    = FEAT_DIR / "clip_text_features"   # pre-computed query embs
+
+TRAIN_ANN = DATA_DIR / "highlight_train_release.jsonl"
+VAL_ANN   = DATA_DIR / "highlight_val_release.jsonl"
+
 OUT_DIR = Path(__file__).parent / "data"
 OUT_DIR.mkdir(exist_ok=True)
 
-TRAIN_ANNOTATIONS = DATA_DIR / "highlight_train_release.jsonl"
-VAL_ANNOTATIONS   = DATA_DIR / "highlight_val_release.jsonl"
-SUBS_FILE         = DATA_DIR / "subs_train.jsonl"
+CLIP_DURATION = 2.0   # each clip is 2 seconds
 
-# OCR-dominant query patterns (heuristic)
+# Built once at startup to avoid globbing 329k files per-video
+_SUB_INDEX: Dict[str, List[Path]] = {}
+
+
+def _build_sub_index():
+    """Pre-index subtitle files: vid → [path, path, ...]. Called once."""
+    global _SUB_INDEX
+    if _SUB_INDEX:
+        return
+    print("[Setup] Building subtitle file index (one-time scan of 329k files)...")
+    for p in CLIP_SUB_DIR.glob("qid-*.npz"):
+        # Filename: qid-{vid}_subs{N}.npz
+        name = p.stem  # e.g. qid---a6qL3eL0c_210.0_360.0_subs0
+        # Strip leading "qid-" and trailing "_subsN"
+        inner = name[4:]  # ---a6qL3eL0c_210.0_360.0_subs0
+        vid = "_subs".join(inner.split("_subs")[:-1])  # ---a6qL3eL0c_210.0_360.0
+        _SUB_INDEX.setdefault(vid, []).append(p)
+    print(f"[Setup] Subtitle index built: {len(_SUB_INDEX)} unique videos.")
+
+
+# ─── OCR / Speech heuristics ──────────────────────────────────────────────────
+
 _OCR_PATTERNS = [
-    r"\bcode\b", r"\bscript\b", r"\btext\b", r"\bscreen\b", r"\bslide\b",
-    r"\bwrite\b", r"\btyp\w+\b", r"\bformula\b", r"\bequation\b", r"\bmath\b",
-    r"\bsubtitle\b", r"\bcaption\b", r"\blabel\b", r"\bheading\b",
+    r"\bcode\b", r"\bscript\b", r"\btext on\b", r"\bscreen\b",
+    r"\bslide\b", r"\bwrite\b", r"\btyp\w+\b", r"\bformula\b",
+    r"\bequation\b", r"\bmath\b", r"\bsubtitle\b", r"\bcaption\b",
 ]
 _SPEECH_PATTERNS = [
-    r"\bexplains?\b", r"\bsays?\b", r"\btalk\w*\b", r"\bdiscuss\w*\b",
-    r"\bnarrat\w+\b", r"\bpresent\w+\b", r"\bspeak\w*\b", r"\bvoice\b",
-    r"\bmentions?\b", r"\bquot\w+\b", r"\bdescrib\w+\b",
+    r"\bexplains?\b", r"\bsays?\b", r"\bsaid\b", r"\btalk\w*\b",
+    r"\bdiscuss\w*\b", r"\bnarrat\w+\b", r"\bpresent\w+\b",
+    r"\bspeak\w*\b", r"\bvoice\b", r"\bmentions?\b", r"\bdescrib\w+\b",
 ]
 
 
 def _ocr_signal(query: str) -> float:
     q = query.lower()
-    return min(1.0, sum(1 for p in _OCR_PATTERNS if re.search(p, q)) / 2.0)
+    return min(0.8, sum(0.25 for p in _OCR_PATTERNS if re.search(p, q)))
 
 
 def _speech_signal(query: str) -> float:
     q = query.lower()
-    return min(1.0, sum(1 for p in _SPEECH_PATTERNS if re.search(p, q)) / 2.0)
+    return min(0.8, sum(0.25 for p in _SPEECH_PATTERNS if re.search(p, q)))
 
 
-def _load_jsonl(path: Path) -> List[Dict]:
-    with open(path, encoding="utf-8") as f:
-        return [json.loads(l) for l in f if l.strip()]
+# ─── Feature Loading ──────────────────────────────────────────────────────────
+
+def _load_clip_visual(vid: str) -> Optional[np.ndarray]:
+    """Load (N, 512) CLIP visual features for a video. Returns None if missing."""
+    path = CLIP_VISUAL_DIR / f"{vid}.npz"
+    if not path.exists():
+        return None
+    d = np.load(path)
+    feats = d["features"].astype(np.float32)   # (N, 512)
+    # L2-normalize each clip embedding
+    norms = np.linalg.norm(feats, axis=1, keepdims=True) + 1e-8
+    return feats / norms
 
 
-def _build_subtitle_index(subs: List[Dict]) -> Dict[str, List[Dict]]:
-    """Build vid → list of subtitle entries index for fast lookup."""
-    idx = defaultdict(list)
-    for s in subs:
-        idx[s["vid"]].append(s)
-    return idx
-
-
-def _get_gt_subtitle_text(
-    vid: str,
-    relevant_windows: List[List[float]],
-    sub_index: Dict[str, List[Dict]],
-    tolerance: float = 5.0,
-) -> str:
+def _load_clip_sub(vid: str) -> Optional[np.ndarray]:
     """
-    Get the subtitle text that falls within the ground-truth window.
-    Returns concatenated subtitle text, or empty string if not found.
+    Load subtitle CLIP embeddings for a video using the pre-built index.
+    Returns stacked (M, 512) array, or None if no files found.
     """
-    entries = sub_index.get(vid, [])
-    matched = []
-    for w_start, w_end in relevant_windows:
-        for entry in entries:
-            for sub_start, sub_end in entry.get("relevant_windows", []):
-                # Check overlap with GT window (with tolerance)
-                if sub_start <= w_end + tolerance and sub_end >= w_start - tolerance:
-                    matched.append(entry["query"])
-                    break
+    files = _SUB_INDEX.get(vid)
+    if not files:
+        return None
 
-    return " ".join(matched) if matched else ""
+    all_feats = []
+    for f in files:
+        d = np.load(f)
+        feats = d["features"].astype(np.float32)
+        norms = np.linalg.norm(feats, axis=1, keepdims=True) + 1e-8
+        all_feats.append(feats / norms)
+
+    return np.vstack(all_feats)   # (total_clips, 512)
+
+
+def _windows_to_clip_ids(windows: List[List[float]]) -> List[int]:
+    """Convert second-based windows to 2-sec clip indices."""
+    clip_ids = set()
+    for w_start, w_end in windows:
+        id_start = int(w_start / CLIP_DURATION)
+        id_end   = int(np.ceil(w_end / CLIP_DURATION))
+        clip_ids.update(range(id_start, id_end))
+    return sorted(clip_ids)
+
+
+def _cosine_sim_max(query_emb: np.ndarray, clip_embs: np.ndarray) -> float:
+    """Max cosine similarity between a query embedding and a set of clip embeddings."""
+    if clip_embs.shape[0] == 0:
+        return 0.0
+    # query_emb: (512,)  clip_embs: (M, 512)
+    q = query_emb / (np.linalg.norm(query_emb) + 1e-8)
+    sims = clip_embs @ q   # (M,)
+    return float(np.max(sims))
 
 
 def _build_soft_label(
     visual_score: float,
     speech_score: float,
     ocr_score: float,
-    temperature: float = 2.0,
+    temperature: float = 1.5,
 ) -> np.ndarray:
-    """
-    Build a soft label from modality scores.
-    Uses temperature-scaled softmax to avoid degenerate hard labels.
-    """
+    """Temperature-scaled softmax → soft target label summing to 1."""
     scores = np.array([visual_score, speech_score, ocr_score], dtype=np.float32)
-
-    # Temperature-scaled softmax
-    scores = scores / (temperature + 1e-8)
+    scores = scores / temperature
     scores -= scores.max()
     exp_s = np.exp(scores)
     return exp_s / exp_s.sum()
 
 
-def generate_training_data(
+# ─── Main Generation ──────────────────────────────────────────────────────────
+
+def generate_labels(
     annotations: List[Dict],
-    sub_index: Dict[str, List[Dict]],
     clip_encode_fn,
     max_samples: int,
     batch_size: int,
     split_name: str,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict]]:
     """
-    Generate (query_emb, modality_scores, soft_label) triplets.
-
-    Returns:
-        query_embs:      (N, 512)
-        modality_scores: (N, 3)
-        soft_labels:     (N, 3)
-        meta:            List of dicts with original query info
+    Build (query_emb, modality_scores, soft_label) for all samples.
     """
     samples = annotations[:max_samples]
     n = len(samples)
-    print(f"\n[{split_name}] Generating labels for {n} samples...")
+    print(f"\n[{split_name}] Processing {n} samples...")
 
-    # Batch-encode all queries at once for efficiency
-    print(f"[{split_name}] Encoding {n} queries with CLIP text encoder...")
+    # ── Batch-encode all query texts with CLIP ───────────────────────────────
     queries = [s["query"] for s in samples]
-
-    query_embs = []
+    print(f"[{split_name}] CLIP-encoding {n} queries (batch={batch_size})...")
+    query_embs_list = []
     for i in range(0, n, batch_size):
         batch = queries[i:i+batch_size]
-        embs = clip_encode_fn(batch)   # (B, 512)
-        query_embs.append(embs)
-        if (i // batch_size + 1) % 10 == 0 or i + batch_size >= n:
-            print(f"  Encoded {min(i+batch_size, n)}/{n} queries...")
+        embs = clip_encode_fn(batch)           # (B, 512)
+        embs = embs / (np.linalg.norm(embs, axis=1, keepdims=True) + 1e-8)
+        query_embs_list.append(embs)
+        done = min(i + batch_size, n)
+        if done % 500 == 0 or done == n:
+            print(f"  Encoded {done}/{n}...")
 
-    query_embs_arr = np.vstack(query_embs).astype(np.float32)   # (N, 512)
+    query_embs_arr = np.vstack(query_embs_list).astype(np.float32)   # (N, 512)
 
+    # ── Build per-sample modality scores and soft labels ─────────────────────
     modality_scores_list = []
-    soft_labels_list = []
-    meta = []
+    soft_labels_list     = []
+    meta                 = []
+    missing_visual       = 0
+    missing_speech       = 0
 
     for i, sample in enumerate(samples):
-        vid = sample["vid"]
-        query = sample["query"]
+        vid     = sample["vid"]
+        query   = sample["query"]
         windows = sample.get("relevant_windows", [])
+        q_emb   = query_embs_arr[i]
 
-        # ── Speech score: does subtitle text in GT window match query? ────────
-        gt_subtitle = _get_gt_subtitle_text(vid, windows, sub_index)
-
-        if gt_subtitle:
-            # Encode GT subtitle text + compute cosine similarity with query
-            sub_emb = clip_encode_fn([gt_subtitle])[0]   # (512,)
-            q_emb = query_embs_arr[i]
-            speech_cosine = float(np.dot(q_emb, sub_emb) /
-                                  (np.linalg.norm(q_emb) * np.linalg.norm(sub_emb) + 1e-8))
-            speech_score = max(0.0, speech_cosine)
+        # ── Visual score: real CLIP visual embeddings ─────────────────────
+        visual_feats = _load_clip_visual(vid)      # (N, 512) or None
+        if visual_feats is not None:
+            clip_ids = _windows_to_clip_ids(windows)
+            # Clamp to valid range
+            clip_ids = [c for c in clip_ids if c < len(visual_feats)]
+            if clip_ids:
+                gt_visual_embs = visual_feats[clip_ids]    # (M, 512)
+                visual_score = _cosine_sim_max(q_emb, gt_visual_embs)
+            else:
+                visual_score = 0.15
         else:
-            speech_score = 0.1   # low default when no subtitle found
+            visual_score = 0.20   # fallback
+            missing_visual += 1
 
-        # ── Visual score: CLIP text encodes visual semantics ──────────────────
-        # Queries about visual actions/objects score high on visual modality
-        # We use 1 - speech_signal - ocr_signal as visual score proxy
-        s_sig = _speech_signal(query)
-        o_sig = _ocr_signal(query)
-        visual_score = max(0.1, 1.0 - s_sig - o_sig)
+        # ── Speech score: subtitle CLIP embeddings ────────────────────────
+        sub_feats = _load_clip_sub(vid)            # (N, 512) or None
+        if sub_feats is not None:
+            clip_ids = _windows_to_clip_ids(windows)
+            clip_ids = [c for c in clip_ids if c < len(sub_feats)]
+            if clip_ids:
+                gt_sub_embs = sub_feats[clip_ids]
+                speech_score = _cosine_sim_max(q_emb, gt_sub_embs)
+            else:
+                speech_score = _speech_signal(query) * 0.5
+        else:
+            speech_score = _speech_signal(query) * 0.5
+            missing_speech += 1
 
-        # ── OCR score: keyword heuristic ──────────────────────────────────────
-        ocr_score = max(0.05, o_sig)
+        # ── OCR score: keyword heuristic (QVH is mostly non-text videos) ──
+        ocr_score = max(0.05, _ocr_signal(query) * 0.5)
 
-        # ── Build soft label ─────────────────────────────────────────────────
+        # ── Soft label ────────────────────────────────────────────────────
         label = _build_soft_label(visual_score, speech_score, ocr_score)
 
         modality_scores_list.append([visual_score, speech_score, ocr_score])
         soft_labels_list.append(label)
         meta.append({
-            "qid":          sample.get("qid", i),
-            "query":        query,
-            "vid":          vid,
-            "has_subtitle": bool(gt_subtitle),
-            "gt_windows":   windows,
+            "qid":   sample.get("qid", i),
+            "query": query,
+            "vid":   vid,
+            "has_visual_feats": visual_feats is not None,
+            "has_sub_feats":    sub_feats is not None,
         })
 
-    modality_scores_arr = np.array(modality_scores_list, dtype=np.float32)
-    soft_labels_arr     = np.array(soft_labels_list,     dtype=np.float32)
+        if (i + 1) % 500 == 0 or (i + 1) == n:
+            print(f"  Labels: {i+1}/{n} | missing_visual={missing_visual} "
+                  f"missing_speech={missing_speech}")
 
-    print(f"[{split_name}] Done. Shape: embs={query_embs_arr.shape}, "
-          f"scores={modality_scores_arr.shape}, labels={soft_labels_arr.shape}")
-    return query_embs_arr, modality_scores_arr, soft_labels_arr, meta
+    modality_scores = np.array(modality_scores_list, dtype=np.float32)
+    soft_labels     = np.array(soft_labels_list,     dtype=np.float32)
 
+    print(f"[{split_name}] Done.")
+    print(f"  query_embs:      {query_embs_arr.shape}")
+    print(f"  modality_scores: {modality_scores.shape}  "
+          f"mean=[{modality_scores.mean(axis=0)}]")
+    print(f"  soft_labels:     {soft_labels.shape}  "
+          f"mean=[{soft_labels.mean(axis=0).round(3)}]")
+
+    return query_embs_arr, modality_scores, soft_labels, meta
+
+
+# ─── Entry Point ──────────────────────────────────────────────────────────────
 
 def main(args):
-    # ── Load CLIP encoder ────────────────────────────────────────────────────
+    # Validate feature dirs exist
+    if not CLIP_VISUAL_DIR.exists():
+        print(f"[ERROR] CLIP visual features not found at: {CLIP_VISUAL_DIR}")
+        print(f"        Extract moment_detr_features.tar.gz first.")
+        sys.exit(1)
+
+    print(f"[Setup] CLIP visual features: {CLIP_VISUAL_DIR}")
+    print(f"        Files: {len(list(CLIP_VISUAL_DIR.glob('*.npz')))}")
+    print(f"[Setup] CLIP sub features:    {CLIP_SUB_DIR}")
+    print(f"        Files: {len(list(CLIP_SUB_DIR.glob('*.npz')))}")
+
+    # Pre-build subtitle index (scans 329k files once, O(N) not O(N*queries))
+    _build_sub_index()
+
+    # Load CLIP text encoder from our pipeline
     sys.path.insert(0, str(Path(__file__).parent))
     from app.services.clip_model import encode_texts as clip_encode
 
-    # ── Load data ────────────────────────────────────────────────────────────
-    print("[Setup] Loading QVHighlights annotations...")
-    train_anns = _load_jsonl(TRAIN_ANNOTATIONS)
-    val_anns   = _load_jsonl(VAL_ANNOTATIONS)
+
+    # Load annotations
+    print("\n[Setup] Loading annotations...")
+    with open(TRAIN_ANN, encoding="utf-8") as f:
+        train_anns = [json.loads(l) for l in f if l.strip()]
+    with open(VAL_ANN, encoding="utf-8") as f:
+        val_anns = [json.loads(l) for l in f if l.strip()]
     print(f"  Train: {len(train_anns)} | Val: {len(val_anns)}")
 
-    print("[Setup] Building subtitle index (235k entries)...")
-    subs = _load_jsonl(SUBS_FILE)
-    sub_index = _build_subtitle_index(subs)
-    print(f"  Subtitle index built for {len(sub_index)} unique videos.")
-
-    # ── Generate train data ──────────────────────────────────────────────────
-    tr_embs, tr_scores, tr_labels, tr_meta = generate_training_data(
-        train_anns, sub_index, clip_encode,
+    # Generate train labels
+    tr_embs, tr_scores, tr_labels, tr_meta = generate_labels(
+        train_anns, clip_encode,
         max_samples=args.max_samples,
         batch_size=args.batch_size,
         split_name="TRAIN",
     )
 
-    # ── Generate val data ────────────────────────────────────────────────────
-    val_embs, val_scores, val_labels, val_meta = generate_training_data(
-        val_anns, sub_index, clip_encode,
+    # Generate val labels
+    val_embs, val_scores, val_labels, val_meta = generate_labels(
+        val_anns, clip_encode,
         max_samples=min(args.max_samples, len(val_anns)),
         batch_size=args.batch_size,
         split_name="VAL",
     )
 
-    # ── Save ─────────────────────────────────────────────────────────────────
+    # Save
     out_train = OUT_DIR / "qvhighlights_train.npz"
     out_val   = OUT_DIR / "qvhighlights_val.npz"
-    out_meta  = OUT_DIR / "qvhighlights_meta.json"
 
-    np.savez_compressed(out_train,
+    np.savez_compressed(str(out_train),
         query_embs=tr_embs,
         modality_scores=tr_scores,
         soft_labels=tr_labels,
     )
-    np.savez_compressed(out_val,
+    np.savez_compressed(str(out_val),
         query_embs=val_embs,
         modality_scores=val_scores,
         soft_labels=val_labels,
     )
-    with open(out_meta, "w", encoding="utf-8") as f:
-        json.dump({"train": tr_meta[:100], "val": val_meta[:50]}, f, indent=2)
+    with open(OUT_DIR / "meta_train.json", "w") as f:
+        json.dump(tr_meta[:200], f, indent=2)
 
-    print(f"\n[Done] Saved:")
-    print(f"  Train: {out_train}  ({len(tr_embs)} samples)")
-    print(f"  Val:   {out_val}    ({len(val_embs)} samples)")
-    print(f"  Meta:  {out_meta}")
-    print(f"\nNext step:")
+    print(f"\n[DONE] Saved to ml-service/data/")
+    print(f"  qvhighlights_train.npz : {len(tr_embs)} samples")
+    print(f"  qvhighlights_val.npz   : {len(val_embs)} samples")
+    print(f"\nNext:")
     print(f"  python train_weighting_module.py --data-dir data/ --epochs 200")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate QVHighlights training labels")
-    parser.add_argument("--max-samples", type=int, default=7218,
-                        help="Max train samples to process (default: all 7218)")
-    parser.add_argument("--batch-size",  type=int, default=64,
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-samples", type=int, default=9999999,
+                        help="Limit samples (default: all). Use 100 for quick test.")
+    parser.add_argument("--batch-size",  type=int, default=128,
                         help="CLIP encoding batch size")
     args = parser.parse_args()
     main(args)

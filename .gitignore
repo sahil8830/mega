@@ -83,3 +83,5 @@ desktop.ini
 
 # Docker volumes
 .docker/
+
+moment_detr/

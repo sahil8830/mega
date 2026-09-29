@@ -1,0 +1,17 @@
+.spinner-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.spinner-fullpage {
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.spinner-label {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+  animation: pulse 1.5s ease infinite;
+}

@@ -157,7 +157,60 @@ class FaissManager:
             "ocr_count": self._ocr_index.ntotal,
         }
 
+    def get_video_embeddings(
+        self,
+        video_id: str,
+        index: str = "visual",
+    ) -> np.ndarray:
+        """
+        Retrieve all stored CLIP embeddings for a specific video.
+        Used by Phase 5 temporal refinement for fine-grained localization.
+
+        Returns:
+            np.ndarray of shape (N, 512) sorted by chunk_id,
+            or empty array if video not found.
+        """
+        meta_map = self._meta.get(index, {})
+        faiss_index = self._get_index(index)
+
+        if faiss_index.ntotal == 0:
+            return np.empty((0, 512), dtype=np.float32)
+
+        # Find all FAISS IDs belonging to this video
+        video_entries = [
+            (int(fid), meta)
+            for fid, meta in meta_map.items()
+            if meta.get("video_id") == video_id
+        ]
+
+        if not video_entries:
+            return np.empty((0, 512), dtype=np.float32)
+
+        # Sort by chunk_id for temporal ordering
+        video_entries.sort(key=lambda x: x[1].get("chunk_id", x[0]))
+
+        # Reconstruct embeddings from FAISS index
+        fids = np.array([e[0] for e in video_entries], dtype=np.int64)
+
+        try:
+            # faiss.extract_index_vectors fetches stored vectors by ID
+            embs = np.zeros((len(fids), EMBED_DIM), dtype=np.float32)
+            faiss_index.reconstruct_batch(fids, embs)
+            return embs
+        except Exception:
+            # Fallback: reconstruct one by one
+            embs = []
+            for fid in fids:
+                try:
+                    v = np.zeros(EMBED_DIM, dtype=np.float32)
+                    faiss_index.reconstruct(int(fid), v)
+                    embs.append(v)
+                except Exception:
+                    pass
+            return np.vstack(embs) if embs else np.empty((0, 512), dtype=np.float32)
+
     # ─── Private Helpers ───────────────────────────────────────────────────────
+
 
     def _load(self) -> None:
         """Load indices and metadata from disk if they exist."""
