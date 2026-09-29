@@ -24,9 +24,7 @@ export default function Navbar() {
             <>
               <NavLink to="/search"  className={({ isActive }) => `navbar-link${isActive ? ' is-active' : ''}`} role="listitem">Search</NavLink>
               <NavLink to="/library" className={({ isActive }) => `navbar-link${isActive ? ' is-active' : ''}`} role="listitem">Library</NavLink>
-              {isAdmin() && (
-                <NavLink to="/upload" className={({ isActive }) => `navbar-link${isActive ? ' is-active' : ''}`} role="listitem">Upload</NavLink>
-              )}
+              <NavLink to="/upload"  className={({ isActive }) => `navbar-link${isActive ? ' is-active' : ''}`} role="listitem">Upload</NavLink>
             </>
           )}
         </div>

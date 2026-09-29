@@ -2,6 +2,7 @@ import express from "express";
 import axios from "axios";
 import Query from "../models/Query.js";
 import Result from "../models/Result.js";
+import { protect } from "../middleware/auth.js";
 
 const router = express.Router();
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8001";
@@ -18,7 +19,7 @@ const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8001";
  *
  * useGqe defaults to true. Set to false for a fast "direct encode" search.
  */
-router.post("/", async (req, res) => {
+router.post("/", protect, async (req, res) => {
   try {
     const { query, topK = 10, useGqe = true } = req.body;
 
@@ -27,8 +28,9 @@ router.post("/", async (req, res) => {
     }
 
     const cleanQuery = query.trim();
+    const userId = req.user._id.toString();
     let gqeData = null;
-    let searchPayload = { query: cleanQuery, top_k: topK };
+    let searchPayload = { query: cleanQuery, top_k: topK, user_id: userId };
 
     // ── Step 1: GQE query expansion (optional) ────────────────────────────
     if (useGqe) {

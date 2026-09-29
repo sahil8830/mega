@@ -3,7 +3,7 @@ Modality-Type Classifier.
 
 Predicts which FAISS index (visual / speech / ocr) is most relevant
 for a given query.  Implemented as a rule-based keyword classifier
-(Phase 2 baseline) — will be upgraded to a trained MLP in Phase 3.
+(Phase 2 baseline) - will be upgraded to a trained MLP in Phase 3.
 
 Returns:
   {
@@ -57,7 +57,7 @@ def classify_modality(query: str) -> Dict:
     """
     Classify a query into the most relevant modality and compute fusion weights.
 
-    The weights are soft — dominant modality gets 0.6, others share 0.2 each.
+    The weights are soft - dominant modality gets 0.6, others share 0.2 each.
     If no clear signal, returns equal weights (0.33 each).
 
     Args:
@@ -75,7 +75,7 @@ def classify_modality(query: str) -> Dict:
     total = visual_score + speech_score + ocr_score
 
     if total == 0:
-        # No signal — equal weights
+        # No signal - equal weights
         return {
             "modality": "all",
             "weights": {"visual": 0.33, "speech": 0.33, "ocr": 0.34},

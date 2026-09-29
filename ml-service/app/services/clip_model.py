@@ -1,5 +1,5 @@
 """
-CLIP Model Singleton — lazy-loads once, shared across all pipeline calls.
+CLIP Model Singleton - lazy-loads once, shared across all pipeline calls.
 
 Uses open_clip to load ViT-B-32 (512-dim embeddings).
 All embeddings are L2-normalized so cosine similarity == inner product (for FAISS IndexFlatIP).

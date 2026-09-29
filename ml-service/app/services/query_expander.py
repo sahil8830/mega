@@ -6,10 +6,10 @@ from a raw user query.  Results are cached in MongoDB (keyed by SHA-256 of the
 query) to avoid redundant LLM calls.
 
 Pipeline:
-  1. Hash query → check MongoDB cache
-  2. If cache miss → run flan-t5 to generate N variants
+  1. Hash query -> check MongoDB cache
+  2. If cache miss -> run flan-t5 to generate N variants
   3. Embed all variants with CLIP text encoder
-  4. K-Means cluster (K=3) → pick centroid-closest representative per cluster
+  4. K-Means cluster (K=3) -> pick centroid-closest representative per cluster
   5. Cache in MongoDB and return
 
 Output:
@@ -17,7 +17,7 @@ Output:
     "original": "...",
     "variants": ["...", ...],          # all N variants
     "representatives": ["...", ...],   # 3 cluster centroids (for FAISS)
-    "representative_embeddings": [...] # shape (3, 512) — ready for search
+    "representative_embeddings": [...] # shape (3, 512) - ready for search
   }
 """
 import hashlib

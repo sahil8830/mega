@@ -5,18 +5,18 @@ This is the CORE NOVEL CONTRIBUTION of the project.
 
 Architecture:
   Input:  query_embedding (512-dim) concatenated with modality_scores (3-dim) = 515-dim
-  Hidden: 256 → 64 (ReLU, Dropout 0.3)
+  Hidden: 256 -> 64 (ReLU, Dropout 0.3)
   Output: 3 weights [w_visual, w_speech, w_ocr] via Softmax (sum to 1.0)
 
-The weights are PER-QUERY — conditioned on both the semantic content of the query
+The weights are PER-QUERY - conditioned on both the semantic content of the query
 AND the actual retrieval scores from FAISS (so the module learns "given this query
 AND these raw scores, which modality should be trusted more?").
 
-Contrast with Phase 2 fixed weights (0.33 / 0.33 / 0.34) — those are static global
+Contrast with Phase 2 fixed weights (0.33 / 0.33 / 0.34) - those are static global
 constants that cannot adapt to the specific query content.
 
 Training signal (Step 3.2): soft labels derived from QVHighlights ground-truth moments.
-If the correct moment is found only by visual search → label = [1, 0, 0], etc.
+If the correct moment is found only by visual search -> label = [1, 0, 0], etc.
 
 Saved weights: ml-service/weights/weighting_module.pt
 """
@@ -45,8 +45,8 @@ class ModalityWeightingMLP(nn.Module):
     """
     Small MLP that predicts per-query modality fusion weights.
 
-    Input shape:  (batch, 515)  — [query_emb || visual_score, speech_score, ocr_score]
-    Output shape: (batch, 3)    — softmax weights [w_visual, w_speech, w_ocr]
+    Input shape:  (batch, 515)  - [query_emb || visual_score, speech_score, ocr_score]
+    Output shape: (batch, 3)    - softmax weights [w_visual, w_speech, w_ocr]
     """
 
     def __init__(self, dropout: float = 0.3):
@@ -69,11 +69,11 @@ class ModalityWeightingMLP(nn.Module):
     def forward(self, query_emb: torch.Tensor, modality_scores: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            query_emb:       (batch, 512) — L2-normalized CLIP query embedding
-            modality_scores: (batch, 3)   — [visual_sim, speech_sim, ocr_sim] from FAISS
+            query_emb:       (batch, 512) - L2-normalized CLIP query embedding
+            modality_scores: (batch, 3)   - [visual_sim, speech_sim, ocr_sim] from FAISS
 
         Returns:
-            weights: (batch, 3) — softmax weights summing to 1.0
+            weights: (batch, 3) - softmax weights summing to 1.0
         """
         x = torch.cat([query_emb, modality_scores], dim=-1)   # (batch, 515)
         logits = self.net(x)                                   # (batch, 3)
@@ -101,7 +101,7 @@ def get_weighting_model(device: str = "cpu") -> ModalityWeightingMLP:
         model.load_state_dict(state)
         print(f"[WeightingMLP] Loaded weights from {WEIGHTS_PATH}")
     else:
-        print(f"[WeightingMLP] No trained weights found — using untrained model.")
+        print(f"[WeightingMLP] No trained weights found - using untrained model.")
         print(f"               Run `python train_weighting_module.py` to train.")
 
     model.eval()
@@ -110,8 +110,8 @@ def get_weighting_model(device: str = "cpu") -> ModalityWeightingMLP:
 
 
 def predict_weights(
-    query_emb: np.ndarray,         # (512,) — L2-normalized
-    modality_scores: np.ndarray,   # (3,)   — [visual_sim, speech_sim, ocr_sim]
+    query_emb: np.ndarray,         # (512,) - L2-normalized
+    modality_scores: np.ndarray,   # (3,)   - [visual_sim, speech_sim, ocr_sim]
     device: str = "cpu",
 ) -> np.ndarray:
     """
@@ -122,7 +122,7 @@ def predict_weights(
         modality_scores: (3,) numpy array, raw FAISS similarity scores
 
     Returns:
-        weights: (3,) numpy array — [w_visual, w_speech, w_ocr], sums to 1.0
+        weights: (3,) numpy array - [w_visual, w_speech, w_ocr], sums to 1.0
     """
     model = get_weighting_model(device)
 

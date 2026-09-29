@@ -46,6 +46,47 @@ router.post("/register", async (req, res) => {
 });
 
 /**
+ * POST /api/auth/register-admin
+ * Creates an admin account directly (dev/demo use).
+ * Body: { name, email, password, adminKey }
+ */
+router.post("/register-admin", async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "name, email, and password are required." });
+    }
+
+    const existing = await User.findOne({ email });
+    if (existing) {
+      // If already exists, just promote to admin
+      const updated = await User.findOneAndUpdate(
+        { email },
+        { $set: { role: "admin" } },
+        { new: true }
+      );
+      const token = signToken(updated._id);
+      return res.json({
+        token,
+        user: { id: updated._id, name: updated.name, email: updated.email, role: updated.role },
+        message: "Existing account promoted to admin.",
+      });
+    }
+
+    const user = await User.create({ name, email, passwordHash: password, role: "admin" });
+    const token = signToken(user._id);
+
+    res.status(201).json({
+      token,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/**
  * POST /api/auth/login
  * Body: { email, password }
  */

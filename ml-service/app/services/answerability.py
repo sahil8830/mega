@@ -1,11 +1,11 @@
 """
-Phase 4 — Answerability Detection.
+Phase 4 - Answerability Detection.
 
 Determines whether the retrieved results are actually relevant to the query,
 or whether the system should say "no matching video found".
 
 Three signals combined:
-  1. Score gap:        top score vs tail score → large gap = confident match
+  1. Score gap:        top score vs tail score -> large gap = confident match
   2. Absolute score:   top score must exceed a minimum threshold
   3. Modality agreement: at least 2 modalities agree on the top result
 
@@ -22,17 +22,21 @@ import numpy as np
 from typing import List, Dict, Any
 
 
-# ─── Thresholds (tuned on QVHighlights val set) ───────────────────────────────
+# ─── Thresholds ───────────────────────────────────────────────────────────────
 
-# Minimum fused score for the top result to be considered relevant
-MIN_TOP_SCORE = 0.20
+# Minimum fused score for the top result to be considered relevant.
+# CLIP cosine similarities typically range 0.15-0.35 for relevant matches.
+# Set low so single-topic corpora (all chunks related) don't get filtered.
+MIN_TOP_SCORE = 0.10
 
-# Minimum gap between top score and median score (ensures top result stands out)
-MIN_SCORE_GAP = 0.05
+# Minimum gap between top and median score.
+# In a single-topic corpus all chunks score similarly, so gap is tiny.
+# Set very low to avoid false "unanswerable" responses.
+MIN_SCORE_GAP = 0.01
 
-# Minimum agreement score: how many modalities agree the top result is good
-MIN_MODALITY_AGREEMENT = 1   # at least 1 modality must have score > this threshold
-MODALITY_AGREE_THRESH  = 0.15
+# Modality agreement: at least 1 modality must score above threshold
+MIN_MODALITY_AGREEMENT = 1
+MODALITY_AGREE_THRESH  = 0.10
 
 
 def compute_answerability(
@@ -86,7 +90,7 @@ def compute_answerability(
     elif len(scores) == 2:
         score_gap = top_score - scores[1]
     else:
-        score_gap = top_score   # only one result → gap = top score itself
+        score_gap = top_score   # only one result -> gap = top score itself
 
     if score_gap < min_gap:
         return {

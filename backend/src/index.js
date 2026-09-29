@@ -15,7 +15,17 @@ await connectDB();
 const app = express();
 
 // Middleware
-app.use(cors({ origin: ["http://localhost:5173", "http://localhost:3000"] }));
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (Postman, server-to-server) or any localhost port
+    if (!origin || /^http:\/\/localhost(:\d+)?$/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    }
+  },
+  credentials: true,
+}));
 app.use(express.json());
 app.use(morgan("dev"));
 

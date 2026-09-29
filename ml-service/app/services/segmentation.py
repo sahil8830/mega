@@ -31,23 +31,49 @@ class ChunkInfo:
     frame_paths: List[str] = field(default_factory=list)
 
 
+def _get_ffprobe_binary() -> str:
+    """Return path to ffprobe: system PATH -> imageio-ffmpeg bundled binary."""
+    import shutil
+    sys_ffprobe = shutil.which("ffprobe")
+    if sys_ffprobe:
+        return sys_ffprobe
+    try:
+        import imageio_ffmpeg
+        ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+        ffprobe_bin = str(ffmpeg_bin).replace("ffmpeg", "ffprobe")
+        if os.path.exists(ffprobe_bin):
+            return ffprobe_bin
+        return ffmpeg_bin  # some bundles only ship ffmpeg; it can also probe
+    except Exception:
+        pass
+    raise RuntimeError("ffprobe not found. Run: pip install imageio-ffmpeg")
+
+
 def get_video_duration(video_path: str) -> float:
     """
-    Use ffprobe to get the duration of a video in seconds.
-    Raises RuntimeError if ffprobe is not available or the file is unreadable.
+    Get the duration of a video in seconds.
+    Tries ffprobe first (system or imageio-ffmpeg bundled), then OpenCV.
     """
-    cmd = [
-        "ffprobe", "-v", "quiet",
-        "-print_format", "json",
-        "-show_format",
-        video_path,
-    ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        info = json.loads(result.stdout)
-        return float(info["format"]["duration"])
-    except (subprocess.CalledProcessError, KeyError, ValueError) as e:
-        raise RuntimeError(f"ffprobe failed for {video_path}: {e}") from e
+        ffprobe = _get_ffprobe_binary()
+        cmd = [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", video_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            info = json.loads(result.stdout)
+            return float(info["format"]["duration"])
+    except Exception as e:
+        print(f"[Segmentation] ffprobe failed ({e}), falling back to OpenCV")
+
+    # Fallback: OpenCV frame count / FPS
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    if frames > 0 and fps > 0:
+        dur = frames / fps
+        print(f"[Segmentation] OpenCV duration estimate: {dur:.1f}s")
+        return dur
+    raise RuntimeError(f"Cannot determine duration for: {video_path}")
 
 
 def segment_video(
@@ -150,7 +176,7 @@ def _extract_frames(
             ret, frame = cap.read()
 
         if ret:
-            # Convert BGR → RGB and save as JPEG
+            # Convert BGR -> RGB and save as JPEG
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(frame_rgb)
             out_path = str(output_dir / f"chunk{chunk_id:04d}_frame{i}.jpg")

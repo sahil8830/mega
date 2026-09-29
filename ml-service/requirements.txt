@@ -4,11 +4,14 @@ uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
 # ─── ML / Deep Learning ───────────────────────────────────────────────────────
-# IMPORTANT: Install torch + torchvision from PyTorch's official CPU index.
-# Do NOT install from PyPI — the CPU wheels there are missing C++ extensions.
-# Command: pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
-torch==2.6.0
-torchvision==0.21.0
+# IMPORTANT: numpy MUST stay <2.0 — torch 2.3.x, whisper, and open_clip were
+# compiled against NumPy 1.x ABI. NumPy 2.x causes 'RuntimeError: Numpy is not available'.
+# scipy MUST be <1.14 — scipy 1.14+ requires numpy>=2.0 (uses np.long which was removed).
+#
+# Install torch + torchvision with CUDA:
+# pip install torch==2.3.1+cu121 torchvision==0.18.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+torch==2.3.1+cu121
+torchvision==0.18.1+cu121
 open_clip_torch==2.26.1
 openai-whisper==20240930
 
@@ -29,6 +32,9 @@ sentencepiece==0.2.0
 # ─── Computer Vision / Video ──────────────────────────────────────────────────
 opencv-python-headless==4.10.0.84
 ffmpeg-python==0.2.0
+# imageio-ffmpeg provides a bundled ffmpeg binary (used by segmentation + Whisper)
+# when ffmpeg is not installed system-wide. Required on Windows dev machines.
+imageio-ffmpeg==0.6.0
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 pymongo==4.8.0
@@ -36,10 +42,11 @@ motor==3.5.1
 
 # ─── Utilities ────────────────────────────────────────────────────────────────
 python-dotenv==1.0.1
-# numpy and scipy: let pip resolve compatible versions (scipy<1.15.3 supports numpy>=1.26)
-numpy>=1.26.0
-scipy>=1.13.0
-scikit-learn==1.6.1
+# ⚠️  PINNED: numpy<2 required for torch/whisper ABI compatibility
+numpy==1.26.4
+# ⚠️  PINNED: scipy<1.14 required for numpy 1.x compatibility (np.long removed in numpy 1.20)
+scipy==1.13.1
+scikit-learn==1.9.1
 Pillow==10.4.0
 tqdm==4.66.5
 httpx==0.27.2

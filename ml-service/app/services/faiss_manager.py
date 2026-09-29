@@ -1,9 +1,8 @@
 """
-FAISS Index Manager.
+FAISS Index Manager - Per-user namespaced indices.
 
-Manages three separate IndexFlatIP indices (visual, speech, OCR).
-Indices are persisted to disk and a JSON metadata map is maintained
-for reverse lookups from FAISS ID → MongoDB segment info.
+Each user gets their own set of three IndexFlatIP indices (visual, speech, OCR)
+stored under faiss/{user_id}/. This provides complete isolation between users.
 
 IndexFlatIP uses inner product similarity. Since all embeddings are
 L2-normalized, this is equivalent to cosine similarity.
@@ -22,16 +21,22 @@ from app.config import get_settings
 
 settings = get_settings()
 
-INDEX_DIR = Path(settings.faiss_index_path)
-INDEX_DIR.mkdir(parents=True, exist_ok=True)
-
-VISUAL_INDEX_PATH = str(INDEX_DIR / "faiss_visual.index")
-SPEECH_INDEX_PATH = str(INDEX_DIR / "faiss_speech.index")
-OCR_INDEX_PATH = str(INDEX_DIR / "faiss_ocr.index")
-META_PATH = str(INDEX_DIR / "faiss_meta.json")
+BASE_INDEX_DIR = Path(settings.faiss_index_path)
+BASE_INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 # Embedding dimension from CLIP ViT-B-32
 EMBED_DIM = 512
+
+# Global registry: user_id -> FaissManager instance
+_user_managers: Dict[str, "FaissManager"] = {}
+_registry_lock = Lock()
+
+
+def _user_index_dir(user_id: str) -> Path:
+    """Return (and create) the FAISS index directory for a specific user."""
+    p = BASE_INDEX_DIR / user_id
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 @dataclass
@@ -48,28 +53,46 @@ class SegmentMeta:
 
 class FaissManager:
     """
-    Thread-safe FAISS index manager for visual, speech, and OCR indices.
-    Singleton — use `get_faiss_manager()` to get the shared instance.
+    Thread-safe FAISS index manager for one user's visual, speech, and OCR indices.
+    Use `get_faiss_manager(user_id)` to get the shared instance for a user.
     """
 
-    def __init__(self):
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self._index_dir = _user_index_dir(user_id)
         self._lock = Lock()
         self._visual_index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBED_DIM)
         self._speech_index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBED_DIM)
         self._ocr_index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBED_DIM)
 
-        # Maps faiss_id (int) → SegmentMeta dict — persisted as JSON
+        # Maps faiss_id (int) -> SegmentMeta dict - persisted as JSON
         self._meta: Dict[str, Dict] = {"visual": {}, "speech": {}, "ocr": {}}
 
         self._load()
+
+    @property
+    def _visual_path(self) -> str:
+        return str(self._index_dir / "faiss_visual.index")
+
+    @property
+    def _speech_path(self) -> str:
+        return str(self._index_dir / "faiss_speech.index")
+
+    @property
+    def _ocr_path(self) -> str:
+        return str(self._index_dir / "faiss_ocr.index")
+
+    @property
+    def _meta_path(self) -> str:
+        return str(self._index_dir / "faiss_meta.json")
 
     # ─── Public API ────────────────────────────────────────────────────────────
 
     def add_segment(
         self,
         visual_emb: np.ndarray,     # shape (512,)
-        speech_emb: np.ndarray,     # shape (512,) — zero vector if no speech
-        ocr_emb: np.ndarray,        # shape (512,) — zero vector if no OCR text
+        speech_emb: np.ndarray,     # shape (512,) - zero vector if no speech
+        ocr_emb: np.ndarray,        # shape (512,) - zero vector if no OCR text
         video_id: str,
         segment_id: str,
         chunk_id: int,
@@ -142,16 +165,17 @@ class FaissManager:
     def save(self) -> None:
         """Persist all three indices and metadata to disk."""
         with self._lock:
-            faiss.write_index(self._visual_index, VISUAL_INDEX_PATH)
-            faiss.write_index(self._speech_index, SPEECH_INDEX_PATH)
-            faiss.write_index(self._ocr_index, OCR_INDEX_PATH)
-            with open(META_PATH, "w") as f:
+            faiss.write_index(self._visual_index, self._visual_path)
+            faiss.write_index(self._speech_index, self._speech_path)
+            faiss.write_index(self._ocr_index, self._ocr_path)
+            with open(self._meta_path, "w") as f:
                 json.dump(self._meta, f)
-        print(f"[FAISS] Saved indices — visual:{self._visual_index.ntotal} "
+        print(f"[FAISS:{self.user_id}] Saved - visual:{self._visual_index.ntotal} "
               f"speech:{self._speech_index.ntotal} ocr:{self._ocr_index.ntotal}")
 
     def stats(self) -> Dict:
         return {
+            "user_id": self.user_id,
             "visual_count": self._visual_index.ntotal,
             "speech_count": self._speech_index.ntotal,
             "ocr_count": self._ocr_index.ntotal,
@@ -165,10 +189,6 @@ class FaissManager:
         """
         Retrieve all stored CLIP embeddings for a specific video.
         Used by Phase 5 temporal refinement for fine-grained localization.
-
-        Returns:
-            np.ndarray of shape (N, 512) sorted by chunk_id,
-            or empty array if video not found.
         """
         meta_map = self._meta.get(index, {})
         faiss_index = self._get_index(index)
@@ -176,7 +196,6 @@ class FaissManager:
         if faiss_index.ntotal == 0:
             return np.empty((0, 512), dtype=np.float32)
 
-        # Find all FAISS IDs belonging to this video
         video_entries = [
             (int(fid), meta)
             for fid, meta in meta_map.items()
@@ -186,19 +205,14 @@ class FaissManager:
         if not video_entries:
             return np.empty((0, 512), dtype=np.float32)
 
-        # Sort by chunk_id for temporal ordering
         video_entries.sort(key=lambda x: x[1].get("chunk_id", x[0]))
-
-        # Reconstruct embeddings from FAISS index
         fids = np.array([e[0] for e in video_entries], dtype=np.int64)
 
         try:
-            # faiss.extract_index_vectors fetches stored vectors by ID
             embs = np.zeros((len(fids), EMBED_DIM), dtype=np.float32)
             faiss_index.reconstruct_batch(fids, embs)
             return embs
         except Exception:
-            # Fallback: reconstruct one by one
             embs = []
             for fid in fids:
                 try:
@@ -211,27 +225,26 @@ class FaissManager:
 
     # ─── Private Helpers ───────────────────────────────────────────────────────
 
-
     def _load(self) -> None:
         """Load indices and metadata from disk if they exist."""
         loaded = []
         for path, attr, name in [
-            (VISUAL_INDEX_PATH, "_visual_index", "visual"),
-            (SPEECH_INDEX_PATH, "_speech_index", "speech"),
-            (OCR_INDEX_PATH, "_ocr_index", "ocr"),
+            (self._visual_path, "_visual_index", "visual"),
+            (self._speech_path, "_speech_index", "speech"),
+            (self._ocr_path, "_ocr_index", "ocr"),
         ]:
             if os.path.exists(path):
                 setattr(self, attr, faiss.read_index(path))
                 loaded.append(name)
 
-        if os.path.exists(META_PATH):
-            with open(META_PATH) as f:
+        if os.path.exists(self._meta_path):
+            with open(self._meta_path) as f:
                 self._meta = json.load(f)
 
         if loaded:
-            print(f"[FAISS] Loaded existing indices: {loaded}")
+            print(f"[FAISS:{self.user_id}] Loaded existing indices: {loaded}")
         else:
-            print("[FAISS] Starting with empty indices.")
+            print(f"[FAISS:{self.user_id}] Starting with empty indices.")
 
     def _get_index(self, index_type: str) -> faiss.IndexFlatIP:
         mapping = {
@@ -244,13 +257,15 @@ class FaissManager:
         return mapping[index_type]
 
 
-# ─── Singleton ─────────────────────────────────────────────────────────────────
-_faiss_manager: Optional[FaissManager] = None
+# ─── Per-user Registry ─────────────────────────────────────────────────────────
 
-
-def get_faiss_manager() -> FaissManager:
-    """Return the shared FaissManager instance, creating it on first call."""
-    global _faiss_manager
-    if _faiss_manager is None:
-        _faiss_manager = FaissManager()
-    return _faiss_manager
+def get_faiss_manager(user_id: str = "global") -> FaissManager:
+    """
+    Return the FaissManager for the given user_id, creating it on first call.
+    Pass user_id='global' for backwards-compatible shared index.
+    """
+    global _user_managers
+    with _registry_lock:
+        if user_id not in _user_managers:
+            _user_managers[user_id] = FaissManager(user_id)
+        return _user_managers[user_id]

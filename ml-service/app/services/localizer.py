@@ -1,5 +1,5 @@
 """
-Phase 5 — Temporal Localization Refinement.
+Phase 5 - Temporal Localization Refinement.
 
 After coarse retrieval returns a segment (e.g., 30s–60s), this module
 refines to the EXACT moment of peak relevance (e.g., 34s–39s).

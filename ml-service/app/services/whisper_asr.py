@@ -4,6 +4,8 @@ Whisper ASR Service.
 Transcribes video audio and maps word-level transcript segments to video chunks.
 Model is loaded once and cached for reuse across pipeline calls.
 """
+import os
+import shutil
 from functools import lru_cache
 from typing import Dict, List
 
@@ -13,6 +15,40 @@ from app.config import get_settings
 from app.services.segmentation import ChunkInfo
 
 settings = get_settings()
+
+
+def _ensure_ffmpeg_in_path() -> None:
+    """
+    Whisper's audio.py calls `ffmpeg` via subprocess to decode audio.
+    imageio-ffmpeg ships the binary as 'ffmpeg-win-x86_64-vX.Y.exe' (versioned name).
+    Windows PATH lookup requires the exact name 'ffmpeg.exe', so we copy it.
+    """
+    if shutil.which("ffmpeg"):
+        return  # Already available system-wide
+
+    try:
+        import imageio_ffmpeg
+        src = imageio_ffmpeg.get_ffmpeg_exe()          # e.g. ffmpeg-win-x86_64-v7.1.exe
+        ffmpeg_dir = os.path.dirname(src)
+        dst = os.path.join(ffmpeg_dir, "ffmpeg.exe")   # the name subprocess/whisper looks for
+
+        if not os.path.exists(dst):
+            import shutil as _shutil
+            _shutil.copy2(src, dst)
+            print(f"[Whisper] Created ffmpeg.exe from {os.path.basename(src)}")
+
+        # Add dir to PATH so subprocess can find ffmpeg.exe
+        current_path = os.environ.get("PATH", "")
+        if ffmpeg_dir not in current_path:
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + current_path
+            print(f"[Whisper] Added ffmpeg dir to PATH: {ffmpeg_dir}")
+
+    except Exception as e:
+        print(f"[Whisper] WARNING: Could not set up ffmpeg ({e}). Transcription may fail.")
+
+
+# Inject ffmpeg into PATH immediately at import time
+_ensure_ffmpeg_in_path()
 
 
 @lru_cache(maxsize=1)
@@ -74,7 +110,7 @@ def map_transcript_to_chunks(
     [chunk.start_time, chunk.end_time].
 
     Returns:
-        Dict mapping chunk_id → transcript text string (empty string if no speech).
+        Dict mapping chunk_id -> transcript text string (empty string if no speech).
     """
     chunk_transcripts: Dict[int, List[str]] = {c.chunk_id: [] for c in chunks}
 

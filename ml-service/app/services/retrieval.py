@@ -9,7 +9,7 @@ Two fusion modes:
   - Dynamic-Weight (Phase 3):        weights from trained MLP conditioned on query + scores
 
 Dynamic weighting is the CORE NOVEL CONTRIBUTION:
-  query_emb → MLP(query_emb || top_scores) → [w_visual, w_speech, w_ocr]
+  query_emb -> MLP(query_emb || top_scores) -> [w_visual, w_speech, w_ocr]
   fused_score = w_v * visual_sim + w_s * speech_sim + w_o * ocr_sim
 """
 from typing import Dict, List, Optional
@@ -57,6 +57,28 @@ def _multi_query_search(
     return list(best.values())
 
 
+def _multi_query_search_with(
+    faiss_mgr,
+    rep_embeddings: np.ndarray,   # (K, 512)
+    index_type: str,
+    top_k: int,
+) -> List[Dict]:
+    """
+    Search a specific FaissManager instance with multiple embeddings.
+    Used when searching a user's private index.
+    """
+    best: Dict[str, Dict] = {}
+
+    for emb in rep_embeddings:
+        results = faiss_mgr.search(emb, index_type=index_type, top_k=top_k)
+        for r in results:
+            sid = r.get("segment_id", str(r.get("faiss_id")))
+            if sid not in best or r["score"] > best[sid]["score"]:
+                best[sid] = r
+
+    return list(best.values())
+
+
 def _get_dynamic_weights(
     query_emb: np.ndarray,
     v_score: float,
@@ -83,6 +105,7 @@ def retrieve(
     modality_weights: Optional[Dict[str, float]] = None,
     top_k: int = FINAL_TOP_K,
     use_dynamic_weights: bool = False,
+    user_id: str = "global",
 ) -> Dict:
     """
     Full retrieval pipeline for a user query.
@@ -117,10 +140,13 @@ def retrieve(
 
     rep_embs = np.array(representative_embeddings, dtype=np.float32)
 
+    # ── Get the user's FAISS manager ──────────────────────────────────────────
+    faiss_mgr = get_faiss_manager(user_id)
+
     # ── Search each index with all representative embeddings ─────────────────
-    visual_results = _multi_query_search(rep_embs, "visual", TOP_K_PER_INDEX)
-    speech_results = _multi_query_search(rep_embs, "speech", TOP_K_PER_INDEX)
-    ocr_results    = _multi_query_search(rep_embs, "ocr",    TOP_K_PER_INDEX)
+    visual_results = _multi_query_search_with(faiss_mgr, rep_embs, "visual", TOP_K_PER_INDEX)
+    speech_results = _multi_query_search_with(faiss_mgr, rep_embs, "speech", TOP_K_PER_INDEX)
+    ocr_results    = _multi_query_search_with(faiss_mgr, rep_embs, "ocr",    TOP_K_PER_INDEX)
 
     # ── Collect all segment_ids seen across modalities ────────────────────────
     all_sids = set(

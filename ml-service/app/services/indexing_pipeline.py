@@ -1,7 +1,7 @@
 """
 Offline Indexing Pipeline Orchestrator.
 
-Wires segmentation → CLIP → Whisper → PaddleOCR → FAISS → MongoDB.
+Wires segmentation -> CLIP -> Whisper -> PaddleOCR -> FAISS -> MongoDB.
 Called by POST /ml/index as a FastAPI BackgroundTask.
 
 Pipeline steps:
@@ -26,9 +26,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import sys
 import numpy as np
 from PIL import Image
 from bson import ObjectId
+
+# Force UTF-8 output so Unicode chars don't crash on Windows cp1252 terminals
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 from app.config import get_settings
 from app.db import get_db
@@ -54,6 +62,7 @@ class IndexingResult:
 async def run_indexing_pipeline(
     video_id: str,
     video_filename: str,
+    user_id: str = "global",
 ) -> IndexingResult:
     """
     Full offline indexing pipeline for a single video.
@@ -82,7 +91,7 @@ async def run_indexing_pipeline(
             overlap=int(os.getenv("CHUNK_OVERLAP_SECONDS", "2")),
             n_frames=int(os.getenv("FRAMES_PER_CHUNK", "2")),
         )
-        print(f"[Pipeline]   → {len(chunks)} chunks created")
+        print(f"[Pipeline]   -> {len(chunks)} chunks created")
 
         # ── Step 2: Whisper ASR (full video, then map to chunks) ───────────────
         print("[Pipeline] Step 2/5: Whisper transcription...")
@@ -91,12 +100,12 @@ async def run_indexing_pipeline(
             transcript_segments, chunks
         )
         non_empty = sum(1 for t in chunk_transcripts.values() if t)
-        print(f"[Pipeline]   → {len(transcript_segments)} words transcribed, "
+        print(f"[Pipeline]   -> {len(transcript_segments)} words transcribed, "
               f"{non_empty}/{len(chunks)} chunks have speech")
 
         # ── Steps 3a-g: Per-chunk processing ───────────────────────────────────
         print(f"[Pipeline] Step 3/5: Processing {len(chunks)} chunks (CLIP + OCR + FAISS + MongoDB)...")
-        faiss_mgr = get_faiss_manager()
+        faiss_mgr = get_faiss_manager(user_id)
         inserted_ids = []
 
         for chunk in chunks:
@@ -110,9 +119,9 @@ async def run_indexing_pipeline(
             inserted_ids.append(segment_doc)
 
             if (chunk.chunk_id + 1) % 5 == 0:
-                print(f"[Pipeline]   → {chunk.chunk_id + 1}/{len(chunks)} chunks done")
+                print(f"[Pipeline]   -> {chunk.chunk_id + 1}/{len(chunks)} chunks done")
 
-        print(f"[Pipeline]   → All {len(chunks)} chunks processed")
+        print(f"[Pipeline]   -> All {len(chunks)} chunks processed")
 
         # ── Step 4: Save FAISS indices ─────────────────────────────────────────
         print("[Pipeline] Step 4/5: Saving FAISS indices...")
@@ -134,7 +143,7 @@ async def run_indexing_pipeline(
         )
 
         stats = faiss_mgr.stats()
-        print(f"\n[Pipeline] ✅ Done! {len(chunks)} segments indexed.")
+        print(f"\n[Pipeline] DONE! {len(chunks)} segments indexed.")
         print(f"[Pipeline] FAISS: visual={stats['visual_count']} "
               f"speech={stats['speech_count']} ocr={stats['ocr_count']}")
 
@@ -148,7 +157,7 @@ async def run_indexing_pipeline(
 
     except Exception as e:
         error_msg = traceback.format_exc()
-        print(f"[Pipeline] ❌ Error: {error_msg}")
+        print(f"[Pipeline] ERROR: {error_msg}")
         await _update_video_status(db, video_id, "failed", str(e))
         # Attempt cleanup even on failure
         try:
@@ -166,7 +175,7 @@ async def _process_chunk(
     faiss_mgr,
 ) -> str:
     """
-    Process a single chunk: visual embedding → speech embedding → OCR → FAISS → MongoDB.
+    Process a single chunk: visual embedding -> speech embedding -> OCR -> FAISS -> MongoDB.
     Returns the MongoDB inserted segment _id as string.
     """
     # ── Visual embedding ────────────────────────────────────────────────────────
@@ -185,12 +194,12 @@ async def _process_chunk(
 
     # ── Speech embedding (CLIP text encoder on transcript) ─────────────────────
     speech_embs = encode_texts([transcript])            # (1, 512)
-    speech_emb = speech_embs[0]                        # (512,) — zero if empty
+    speech_emb = speech_embs[0]                        # (512,) - zero if empty
 
     # ── OCR text + OCR embedding ───────────────────────────────────────────────
     ocr_text = extract_text_from_chunk(chunk.frame_paths)
     ocr_embs = encode_texts([ocr_text])                 # (1, 512)
-    ocr_emb = ocr_embs[0]                              # (512,) — zero if empty
+    ocr_emb = ocr_embs[0]                              # (512,) - zero if empty
 
     # ── Insert Segment to MongoDB first (to get _id for FAISS metadata) ────────
     segment_doc = {

@@ -52,17 +52,17 @@ async function waitForIndexing(videoId) {
 const worker = new Worker(
   "indexing",
   async (job) => {
-    const { videoId, videoFilename } = job.data;
-    console.log(`[Indexing Worker] Starting job ${job.id} for video ${videoId}`);
+    const { videoId, videoFilename, userId = "global" } = job.data;
+    console.log(`[Indexing Worker] Starting job ${job.id} for video ${videoId} (user: ${userId})`);
 
     // Mark video as indexing
     await Video.findByIdAndUpdate(videoId, { status: "indexing" });
 
-    // Trigger ML service — returns immediately with status="indexing"
-    // The pipeline runs as a FastAPI BackgroundTask and updates MongoDB directly
+    // Trigger ML service — pass user_id for per-user FAISS namespacing
     const response = await axios.post(`${ML_SERVICE_URL}/ml/index`, {
       video_id: videoId,
       video_filename: videoFilename,
+      user_id: userId,
     });
 
     console.log(`[Indexing Worker] Pipeline triggered: ${response.data.status}. Polling for completion...`);

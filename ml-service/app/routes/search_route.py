@@ -20,6 +20,7 @@ router = APIRouter()
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=512)
+    user_id: str = Field("global", description="User's MongoDB _id — scopes search to their FAISS index.")
     representative_embeddings: Optional[List[List[float]]] = Field(
         None,
         description="Pre-computed embeddings from /ml/query/expand. "
@@ -130,6 +131,7 @@ async def search_endpoint(request: SearchRequest):
         modality_weights=request.modality_weights,
         top_k=request.top_k,
         use_dynamic_weights=request.use_dynamic_weights,
+        user_id=request.user_id,
     )
 
     raw_results = result["results"]
@@ -180,7 +182,7 @@ async def search_endpoint(request: SearchRequest):
             q_emb = encode_texts([request.query])[0]  # (512,)
             q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-8)
 
-            faiss_mgr = get_faiss_manager()
+            faiss_mgr = get_faiss_manager(request.user_id)
             raw_results = refine_results(
                 query_emb=q_emb,
                 results=raw_results,
