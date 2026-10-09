@@ -17,7 +17,8 @@ export default function VideoCard({ video, onClick }) {
       onClick={onClick}
       role="button"
       tabIndex={0}
-      aria-label={`${video.title} — ${video.status}`}
+      aria-label={`${video.title} — click to watch`}
+      title="Click to watch"
       onKeyDown={(e) => e.key === 'Enter' && onClick?.()}
     >
       <div className="video-card-thumb">

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Trash2, RefreshCw, Eye, Search, Clock } from 'lucide-react'
+import { Trash2, RefreshCw, Eye, Search, Clock, Loader } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { getHistory, getHistoryDetail, deleteHistory } from '../api/history'
 import LoadingSpinner from '../components/LoadingSpinner/LoadingSpinner'
@@ -262,7 +262,7 @@ export default function HistoryPage() {
                               whileHover={{ scale: 1.04, color: '#f87171' }}
                               whileTap={{ scale: 0.96 }}
                             >
-                              {deleting[item._id] ? <Loader size={14} /> : <Trash2 size={14} />}
+                              {deleting[item._id] ? <div className="spinner spinner-sm" /> : <Trash2 size={14} />}
                             </motion.button>
                           )}
                         </div>

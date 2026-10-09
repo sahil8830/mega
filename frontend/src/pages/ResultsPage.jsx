@@ -1,9 +1,8 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useRef, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Play, Eye, Zap, CheckCircle } from 'lucide-react'
+import { ArrowLeft, Play, Eye, Zap } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import ReactPlayer from 'react-player'
 import { search as doSearch } from '../api/search'
 import { useAuthStore } from '../store/authStore'
 import './ResultsPage.css'
@@ -45,14 +44,13 @@ function Bar({ label, weight, score, color }) {
 export default function ResultsPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const playerRef = useRef(null)
+  const playerRef  = useRef(null)   // native <video> element ref
+  const hasSeeked   = useRef(false)  // prevent onCanPlay re-seek loop
   const token = useAuthStore(s => s.token)
 
   const state = location.state
-  const [activeIdx, setActiveIdx] = useState(0)
-  const [seeking, setSeeking] = useState(false)
+  const [activeIdx, setActiveIdx]   = useState(0)
   const [rerunLoading, setRerunLoading] = useState(false)
-  const [playerReady, setPlayerReady] = useState(false)
 
   const result = state?.result
   const query = state?.query
@@ -67,13 +65,32 @@ export default function ResultsPage() {
     if (!state) navigate('/search', { replace: true })
   }, [state, navigate])
 
-  // Seek whenever active result changes
+  // onCanPlay: seek only ONCE per video load (fires repeatedly on each buffer)
+  const handleCanPlay = () => {
+    if (hasSeeked.current) return          // already seeked — ignore
+    if (playerRef.current && active?.start_time != null) {
+      playerRef.current.currentTime = active.start_time
+      hasSeeked.current = true
+    }
+  }
+
+  // When user picks a different result, reset hasSeeked and seek if loaded
   useEffect(() => {
-    if (!playerReady || !active || !playerRef.current) return
-    setSeeking(true)
-    playerRef.current.seekTo(active.start_time, 'seconds')
-    setSeeking(false)
-  }, [activeIdx, playerReady, active?.start_time])
+    hasSeeked.current = false              // allow next onCanPlay to seek
+    const vid = playerRef.current
+    if (!vid || active?.start_time == null) return
+    if (vid.readyState >= 2) {             // already loaded — seek immediately
+      vid.currentTime = active.start_time
+      hasSeeked.current = true
+    }
+  }, [activeIdx])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSeek = () => {
+    if (playerRef.current && active?.start_time != null) {
+      playerRef.current.currentTime = active.start_time
+      playerRef.current.play().catch(() => {})
+    }
+  }
 
   const handleRerun = async () => {
     if (!query || rerunLoading) return
@@ -198,15 +215,21 @@ export default function ResultsPage() {
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.3 }}
                     >
-                      <ReactPlayer
+                      <video
                         ref={playerRef}
-                        url={videoSrc}
-                        width="100%"
-                        height="100%"
+                        src={videoSrc}
                         controls
-                        playing={false}
-                        onReady={() => setPlayerReady(true)}
-                        config={{ file: { attributes: { controlsList: 'nodownload' } } }}
+                        onCanPlay={handleCanPlay}
+                        onError={(e) => console.error('[Video] error', e.target.error)}
+                        preload="metadata"
+                        controlsList="nodownload"
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          aspectRatio: '16 / 9',
+                          background: '#000',
+                          maxHeight: '60vh',
+                        }}
                       />
                     </motion.div>
                   ) : (
@@ -229,11 +252,7 @@ export default function ResultsPage() {
                       className="btn btn-secondary btn-sm"
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
-                      onClick={() => {
-                        if (playerRef.current) {
-                          playerRef.current.seekTo(active.start_time, 'seconds')
-                        }
-                      }}
+                      onClick={handleSeek}
                     >
                       ▶ Jump to {fmt(active.start_time)}
                     </motion.button>

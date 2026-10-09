@@ -41,7 +41,7 @@ _EXPANSION_PROMPT = (
     "Output only the queries, one per line, no numbering."
 )
 
-N_VARIANTS = 8      # how many variants to generate
+N_VARIANTS = 4      # fewer variants = faster CPU inference
 N_CLUSTERS = 3      # how many representative queries to keep
 
 
@@ -118,6 +118,7 @@ def _generate_variants_local(query: str) -> List[str]:
         do_sample=True,
         temperature=0.8,
         top_p=0.9,
+        max_new_tokens=128,   # reduced from 256 for speed
     )
 
     variants = []
@@ -223,15 +224,21 @@ async def expand_query(query: str) -> Dict:
             "from_cache": True,
         }
 
-    # ── Generate variants ──────────────────────────────────────────────────────
+    # ── Generate variants (run in thread — flan-t5 is CPU-bound & blocking) ──
+    import asyncio
+    loop = asyncio.get_event_loop()
     try:
-        variants = _generate_variants_local(query)
+        variants = await loop.run_in_executor(
+            None, _generate_variants_local, query
+        )
     except Exception as e:
         print(f"[GQE] Variant generation failed: {e}. Falling back to original query only.")
         variants = []
 
-    # ── Cluster + select representatives ──────────────────────────────────────
-    cluster_result = _cluster_and_select(query, variants)
+    # ── Cluster + select representatives (also CPU-bound) ─────────────────────
+    cluster_result = await loop.run_in_executor(
+        None, _cluster_and_select, query, variants
+    )
     representatives = cluster_result["representatives"]
     rep_embs = cluster_result["representative_embeddings"].tolist()
 

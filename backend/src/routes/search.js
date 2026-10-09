@@ -18,7 +18,14 @@ const mlAgent = new http.Agent({ keepAlive: true, maxSockets: 10 });
 const mlAxios = axios.create({
   baseURL:  ML_SERVICE_URL,
   httpAgent: mlAgent,
-  timeout:  120_000,  // 2 min max for slow GQE/indexing
+  timeout:  60_000,   // 60s for search/index
+});
+
+// Separate client for GQE — shorter timeout so we fail fast and fall back
+const gqeAxios = axios.create({
+  baseURL:   ML_SERVICE_URL,
+  httpAgent: mlAgent,
+  timeout:   30_000,  // 30s — if flan-t5 is still loading, fall back quickly
 });
 
 
@@ -72,7 +79,7 @@ router.post("/", protect, async (req, res) => {
       } else {
         // Cache miss: call ML service (slow path, 5–30 s)
         try {
-          const expandRes = await mlAxios.post(`/ml/query/expand`, { query: cleanQuery });
+          const expandRes = await gqeAxios.post(`/ml/query/expand`, { query: cleanQuery });
           gqeData = expandRes.data;
           searchPayload.representative_embeddings = gqeData.representative_embeddings;
           searchPayload.modality_weights          = gqeData.weights;

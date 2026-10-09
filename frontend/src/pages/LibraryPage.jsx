@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast'
 import { listVideos } from '../api/videos'
 import client from '../api/client'
 import VideoCard from '../components/VideoCard/VideoCard'
+import VideoPlayerModal from '../components/VideoPlayerModal/VideoPlayerModal'
 import LoadingSpinner from '../components/LoadingSpinner/LoadingSpinner'
 import './LibraryPage.css'
 
@@ -16,6 +17,7 @@ export default function LibraryPage() {
   const [reindexing, setReindexing] = useState({})
   const [confirming, setConfirming] = useState({})
   const [deleting,   setDeleting]   = useState({})
+  const [playing,    setPlaying]    = useState(null)   // video object for modal
   const navigate = useNavigate()
 
   const fetchVideos = () => {
@@ -29,7 +31,7 @@ export default function LibraryPage() {
   useEffect(() => { fetchVideos() }, [])
 
   const handleClick = (video) => {
-    if (video.status === 'indexed') navigate('/search', { state: { videoId: video._id } })
+    setPlaying(video)   // open modal for ANY video
   }
 
   const handleReindex = async (e, video) => {
@@ -86,6 +88,7 @@ export default function LibraryPage() {
   }
 
   return (
+    <>
     <main className="page library-page">
       <div className="page-body">
         <motion.header
@@ -197,5 +200,12 @@ export default function LibraryPage() {
         )}
       </div>
     </main>
+
+    {/* Video Player Modal */}
+    <VideoPlayerModal
+      video={playing}
+      onClose={() => setPlaying(null)}
+    />
+  </>
   )
 }
