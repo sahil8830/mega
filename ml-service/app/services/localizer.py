@@ -29,8 +29,8 @@ import numpy as np
 
 
 CLIP_DURATION = 2.0      # default clip stride used during indexing (seconds)
-REFINE_WINDOW = 5.0      # sliding window width for peak detection (seconds)
-MIN_SEGMENT_DURATION = 2.0   # minimum refined segment length
+REFINE_WINDOW = 15.0     # sliding window width for peak detection (seconds) — matches min output length
+MIN_SEGMENT_DURATION = 15.0   # minimum refined segment length (never return < 15s)
 
 
 def _gaussian_smooth(scores: np.ndarray, sigma: float = 1.5) -> np.ndarray:
@@ -178,7 +178,7 @@ def refine_results(
     results: List[Dict[str, Any]],
     faiss_manager,
     refine_top_k: int = 3,
-    context_window: float = 30.0,
+    context_window: float = 60.0,
     refine_window_sec: float = REFINE_WINDOW,
     min_confidence: float = 0.3,
 ) -> List[Dict[str, Any]]:

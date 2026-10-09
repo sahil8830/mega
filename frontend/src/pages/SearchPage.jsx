@@ -15,7 +15,7 @@ export default function SearchPage() {
   const navigate  = useNavigate()
   const location  = useLocation()
   const inputRef  = useRef(null)
-  const [query,   setQuery]   = useState('')
+  const [query,   setQuery]   = useState(location.state?.prefill ?? '')
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
   const [gqe,     setGqe]     = useState(true)

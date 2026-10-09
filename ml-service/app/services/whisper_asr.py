@@ -69,11 +69,27 @@ def transcribe_video(video_path: str) -> List[Dict]:
     """
     model = get_whisper_model()
 
+    # Step 1: Detect language first with a quick 30-sec probe
+    audio = whisper.load_audio(video_path)
+    audio_probe = whisper.pad_or_trim(audio)
+    mel = whisper.log_mel_spectrogram(audio_probe).to(model.device)
+    _, probs = model.detect_language(mel)
+    detected_lang = max(probs, key=probs.get)
+    print(f"[Whisper] Detected language: {detected_lang}")
+
+    # Step 2: If non-English, use task="translate" so CLIP gets English text
+    # This means Hindi/Urdu/etc. speech becomes English → CLIP can match it
+    task = "translate" if detected_lang != "en" else "transcribe"
+    if task == "translate":
+        print(f"[Whisper] Non-English audio ({detected_lang}) → translating to English for CLIP")
+
     result = model.transcribe(
         video_path,
         word_timestamps=True,
         verbose=False,
-        fp16=False,  # fp16 not supported on CPU
+        fp16=False,        # fp16 not supported on CPU
+        task=task,         # "transcribe" for English, "translate" for everything else
+        language=detected_lang,
     )
 
     # Flatten word-level segments from all top-level segments

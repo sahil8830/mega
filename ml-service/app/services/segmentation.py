@@ -78,18 +78,20 @@ def get_video_duration(video_path: str) -> float:
 
 def segment_video(
     video_path: str,
-    chunk_size: int = 10,
-    overlap: int = 2,
-    n_frames: int = 2,
+    chunk_size: int = 7,
+    overlap: int = 3,
+    n_frames: int = 4,
 ) -> List[ChunkInfo]:
     """
     Split a video into overlapping chunks and extract representative frames.
 
     Args:
         video_path: Absolute path to the video file.
-        chunk_size: Length of each chunk in seconds (default 10s).
-        overlap: Overlap between consecutive chunks in seconds (default 2s).
-        n_frames: Number of frames to sample per chunk (default 2).
+        chunk_size: Length of each chunk in seconds (default 7s — kept small for
+                    fine-grained FAISS indexing; output windows are expanded to
+                    MIN_RESULT_DURATION at query time).
+        overlap: Overlap between consecutive chunks in seconds (default 3s).
+        n_frames: Number of frames to sample per chunk (default 4).
 
     Returns:
         List of ChunkInfo objects, one per chunk.

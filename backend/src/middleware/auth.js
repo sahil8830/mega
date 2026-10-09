@@ -6,27 +6,35 @@ import User from "../models/User.js";
  * Attaches `req.user` on success.
  */
 export const protect = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
+  // Accept token from Authorization header OR ?token= query param
+  // (query param needed for <video src="..."> which can't set headers)
+  let token = null
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Not authorized. No token provided." });
+  const authHeader = req.headers.authorization
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1]
+  } else if (req.query.token) {
+    token = req.query.token
   }
 
-  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ message: "Not authorized. No token provided." })
+  }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id).select("-passwordHash");
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    req.user = await User.findById(decoded.id).select("-passwordHash")
 
     if (!req.user) {
-      return res.status(401).json({ message: "User not found." });
+      return res.status(401).json({ message: "User not found." })
     }
 
-    next();
+    next()
   } catch {
-    return res.status(401).json({ message: "Invalid or expired token." });
+    return res.status(401).json({ message: "Invalid or expired token." })
   }
-};
+}
+
 
 /**
  * Middleware: restrict route to admins only.

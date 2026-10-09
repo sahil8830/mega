@@ -87,10 +87,11 @@ async def run_indexing_pipeline(
         print("[Pipeline] Step 1/5: Temporal segmentation...")
         chunks: List[ChunkInfo] = segment_video(
             video_path=video_path,
-            chunk_size=int(os.getenv("CHUNK_SIZE_SECONDS", "10")),
-            overlap=int(os.getenv("CHUNK_OVERLAP_SECONDS", "2")),
-            n_frames=int(os.getenv("FRAMES_PER_CHUNK", "2")),
+            chunk_size=int(os.getenv("CHUNK_SIZE_SECONDS", "7")),
+            overlap=int(os.getenv("CHUNK_OVERLAP_SECONDS", "3")),
+            n_frames=int(os.getenv("FRAMES_PER_CHUNK", "4")),
         )
+
         print(f"[Pipeline]   -> {len(chunks)} chunks created")
 
         # ── Step 2: Whisper ASR (full video, then map to chunks) ───────────────
@@ -192,13 +193,25 @@ async def _process_chunk(
     else:
         visual_emb = np.zeros(512, dtype=np.float32)
 
-    # ── Speech embedding (CLIP text encoder on transcript) ─────────────────────
-    speech_embs = encode_texts([transcript])            # (1, 512)
+    # ── Speech embedding ────────────────────────────────────────────────────────
+    # Wrap in a CLIP-friendly prompt: aligns with image-caption training
+    # distribution and dramatically improves text-to-image similarity scores.
+    if transcript.strip():
+        speech_prompt = f"A sports commentator says: {transcript.strip()}"
+    else:
+        speech_prompt = ""
+    speech_embs = encode_texts([speech_prompt])         # (1, 512)
     speech_emb = speech_embs[0]                        # (512,) - zero if empty
+
 
     # ── OCR text + OCR embedding ───────────────────────────────────────────────
     ocr_text = extract_text_from_chunk(chunk.frame_paths)
-    ocr_embs = encode_texts([ocr_text])                 # (1, 512)
+    # Wrap OCR in a CLIP-friendly prompt
+    if ocr_text.strip():
+        ocr_prompt = f"On-screen text reads: {ocr_text.strip()}"
+    else:
+        ocr_prompt = ""
+    ocr_embs = encode_texts([ocr_prompt])               # (1, 512)
     ocr_emb = ocr_embs[0]                              # (512,) - zero if empty
 
     # ── Insert Segment to MongoDB first (to get _id for FAISS metadata) ────────

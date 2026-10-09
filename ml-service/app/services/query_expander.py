@@ -61,6 +61,47 @@ def _get_t5_pipeline():
     return pipe
 
 
+@lru_cache(maxsize=1)
+def _get_translation_pipeline():
+    """Lazy-load Helsinki-NLP Hindi→English translation model (12 MB, CPU-only)."""
+    try:
+        from transformers import pipeline as hf_pipeline
+        print("[GQE] Loading Hindi→English translator...")
+        pipe = hf_pipeline(
+            "translation",
+            model="Helsinki-NLP/opus-mt-hi-en",
+            device=-1,
+        )
+        print("[GQE] Translator loaded.")
+        return pipe
+    except Exception as e:
+        print(f"[GQE] Translation model unavailable ({e}). Hindi queries will use raw text.")
+        return None
+
+
+def _contains_devanagari(text: str) -> bool:
+    """Returns True if the text contains Hindi/Devanagari script characters."""
+    return any('\u0900' <= ch <= '\u097F' for ch in text)
+
+
+def _translate_to_english(text: str) -> str:
+    """
+    Translate Hindi (or other Devanagari) query to English.
+    Falls back to original text if translation model is unavailable.
+    """
+    pipe = _get_translation_pipeline()
+    if pipe is None:
+        return text
+    try:
+        result = pipe(text, max_length=128)
+        translated = result[0]["translation_text"].strip()
+        print(f"[GQE] Translated query: '{text}' → '{translated}'")
+        return translated
+    except Exception as e:
+        print(f"[GQE] Translation failed ({e}), using original query.")
+        return text
+
+
 # ─── Core Functions ───────────────────────────────────────────────────────────
 def _query_hash(query: str) -> str:
     return hashlib.sha256(query.strip().lower().encode()).hexdigest()
@@ -158,7 +199,15 @@ async def expand_query(query: str) -> Dict:
         "from_cache": bool
     }
     """
-    query = query.strip()
+    original_query = query.strip()
+    query = original_query
+
+    # ── Auto-translate non-English (Hindi/Devanagari) queries ─────────────────
+    if _contains_devanagari(query):
+        print(f"[GQE] Hindi query detected: '{query}'")
+        query = _translate_to_english(query)
+        print(f"[GQE] Using translated query for search: '{query}'")
+
     q_hash = _query_hash(query)
     db = get_db()
 
@@ -166,10 +215,11 @@ async def expand_query(query: str) -> Dict:
     cached = await db["query_cache"].find_one({"queryHash": q_hash})
     if cached:
         return {
-            "original": query,
-            "variants": cached["variants"],
-            "representatives": cached["representatives"],
-            "representative_embeddings": cached["representativeEmbeddings"],
+            "original":   original_query,
+            "translated": query if query != original_query else None,
+            "variants":   cached["variants"],
+            "representatives":            cached["representatives"],
+            "representative_embeddings":  cached["representativeEmbeddings"],
             "from_cache": True,
         }
 

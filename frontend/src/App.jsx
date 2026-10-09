@@ -11,6 +11,7 @@ const LibraryPage  = lazy(() => import('./pages/LibraryPage'))
 const UploadPage   = lazy(() => import('./pages/UploadPage'))
 const SearchPage   = lazy(() => import('./pages/SearchPage'))
 const ResultsPage  = lazy(() => import('./pages/ResultsPage'))
+const HistoryPage  = lazy(() => import('./pages/HistoryPage'))
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
           <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
           <Route path="/results" element={<ProtectedRoute><ResultsPage /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

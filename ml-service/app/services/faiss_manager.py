@@ -181,6 +181,61 @@ class FaissManager:
             "ocr_count": self._ocr_index.ntotal,
         }
 
+    def reset_for_video(self, video_id: str) -> None:
+        """
+        Remove all FAISS entries for a specific video so it can be re-indexed.
+        Rebuilds each index from the retained entries (all other videos).
+        Saves to disk immediately.
+        """
+        with self._lock:
+            for idx_type in ("visual", "speech", "ocr"):
+                old_meta = self._meta.get(idx_type, {})
+                old_index = self._get_index(idx_type)
+
+                # Collect entries to KEEP (not belonging to this video)
+                keep = [
+                    (int(fid), m)
+                    for fid, m in old_meta.items()
+                    if m.get("video_id") != video_id
+                ]
+
+                # Rebuild index with only kept entries
+                new_index = faiss.IndexFlatIP(EMBED_DIM)
+                new_meta: Dict[str, Dict] = {}
+
+                for new_fid, (old_fid, m) in enumerate(keep):
+                    vec = np.zeros(EMBED_DIM, dtype=np.float32)
+                    try:
+                        old_index.reconstruct(old_fid, vec)
+                    except Exception:
+                        continue
+                    new_index.add(vec.reshape(1, -1))
+                    new_meta[str(new_fid)] = {**m, "faiss_id": new_fid}
+
+                # Replace in-memory index + meta
+                if idx_type == "visual":
+                    self._visual_index = new_index
+                elif idx_type == "speech":
+                    self._speech_index = new_index
+                else:
+                    self._ocr_index = new_index
+                self._meta[idx_type] = new_meta
+
+            self.save()
+            print(f"[FAISS:{self.user_id}] Cleared video {video_id} entries. "
+                  f"Remaining: visual={self._visual_index.ntotal} "
+                  f"speech={self._speech_index.ntotal} ocr={self._ocr_index.ntotal}")
+
+    def full_reset(self) -> None:
+        """Wipe all indices for this user. Use before a complete re-index."""
+        with self._lock:
+            self._visual_index = faiss.IndexFlatIP(EMBED_DIM)
+            self._speech_index = faiss.IndexFlatIP(EMBED_DIM)
+            self._ocr_index    = faiss.IndexFlatIP(EMBED_DIM)
+            self._meta = {"visual": {}, "speech": {}, "ocr": {}}
+            self.save()
+            print(f"[FAISS:{self.user_id}] Full reset complete.")
+
     def get_video_embeddings(
         self,
         video_id: str,

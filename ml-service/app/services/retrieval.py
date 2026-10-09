@@ -13,6 +13,7 @@ Dynamic weighting is the CORE NOVEL CONTRIBUTION:
   fused_score = w_v * visual_sim + w_s * speech_sim + w_o * ocr_sim
 """
 from typing import Dict, List, Optional
+import concurrent.futures
 
 import numpy as np
 
@@ -24,6 +25,31 @@ from app.services.modality_classifier import classify_modality
 DEFAULT_WEIGHTS = {"visual": 0.33, "speech": 0.33, "ocr": 0.34}
 TOP_K_PER_INDEX = 20   # retrieve more than needed, then fuse and re-rank
 FINAL_TOP_K = 10       # return this many after fusion
+
+# Query prompt template — aligns with how speech/OCR were indexed
+# (prompt-wrapped before encode_texts in the pipeline)
+QUERY_PROMPT = "A video moment where a sports commentator describes: {query}"
+
+
+def _normalize_scores(results: List[Dict], score_key: str = "score") -> List[Dict]:
+    """
+    Normalize a list of result scores to [0, 1] using min-max scaling.
+    Prevents one modality from dominating due to scale differences.
+    """
+    if not results:
+        return results
+    scores = [r[score_key] for r in results]
+    min_s, max_s = min(scores), max(scores)
+    span = max_s - min_s
+    if span < 1e-8:
+        # All scores identical — assign equal normalized score (0.5)
+        for r in results:
+            r["_norm_score"] = 0.5
+    else:
+        for r in results:
+            r["_norm_score"] = (r[score_key] - min_s) / span
+    return results
+
 
 
 def _search_one_embedding(
@@ -130,12 +156,15 @@ def retrieve(
             "weighting_mode": "dynamic" | "fixed",
         }
     """
-    # ── Modality classification (used for fallback + label) ─────────────────
+    # ── Modality classification ───────────────────────────────────────────────
+    # When dynamic weights are active the MLP overrides classifier weights,
+    # so we still call it (fast) just to get the modality LABEL for the UI.
     modality_info = classify_modality(query)
 
-    # ── Encode query if no pre-computed embeddings ───────────────────────────
+    # ── Encode query with prompt wrapping ────────────────────────────────────
     if representative_embeddings is None:
-        embs = encode_texts([query])           # (1, 512)
+        wrapped = QUERY_PROMPT.format(query=query)
+        embs = encode_texts([query, wrapped])    # (2, 512) — raw + wrapped
         representative_embeddings = embs
 
     rep_embs = np.array(representative_embeddings, dtype=np.float32)
@@ -143,10 +172,23 @@ def retrieve(
     # ── Get the user's FAISS manager ──────────────────────────────────────────
     faiss_mgr = get_faiss_manager(user_id)
 
-    # ── Search each index with all representative embeddings ─────────────────
-    visual_results = _multi_query_search_with(faiss_mgr, rep_embs, "visual", TOP_K_PER_INDEX)
-    speech_results = _multi_query_search_with(faiss_mgr, rep_embs, "speech", TOP_K_PER_INDEX)
-    ocr_results    = _multi_query_search_with(faiss_mgr, rep_embs, "ocr",    TOP_K_PER_INDEX)
+    # ── Search all 3 indices IN PARALLEL (3× faster for large indexes) ────────
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        f_visual = pool.submit(_multi_query_search_with, faiss_mgr, rep_embs, "visual", TOP_K_PER_INDEX)
+        f_speech = pool.submit(_multi_query_search_with, faiss_mgr, rep_embs, "speech", TOP_K_PER_INDEX)
+        f_ocr    = pool.submit(_multi_query_search_with, faiss_mgr, rep_embs, "ocr",    TOP_K_PER_INDEX)
+        visual_results = f_visual.result()
+        speech_results = f_speech.result()
+        ocr_results    = f_ocr.result()
+
+    # ── Normalize scores per modality IN PARALLEL ────────────────────────────
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        f_vn = pool.submit(_normalize_scores, visual_results)
+        f_sn = pool.submit(_normalize_scores, speech_results)
+        f_on = pool.submit(_normalize_scores, ocr_results)
+        visual_results = f_vn.result()
+        speech_results = f_sn.result()
+        ocr_results    = f_on.result()
 
     # ── Collect all segment_ids seen across modalities ────────────────────────
     all_sids = set(
@@ -157,8 +199,9 @@ def retrieve(
 
     # ── Build score maps per modality ─────────────────────────────────────────
     def _score_map(results: List[Dict]) -> Dict[str, float]:
+        # Use normalized score if available, fall back to raw
         return {
-            r.get("segment_id", str(r.get("faiss_id"))): r["score"]
+            r.get("segment_id", str(r.get("faiss_id"))): r.get("_norm_score", r["score"])
             for r in results
         }
 
@@ -191,6 +234,26 @@ def retrieve(
         weights = modality_weights
     else:
         weights = modality_info["weights"]
+
+    # ── Dynamic weight zeroing for empty modalities (B3) ──────────────────────────
+    # If a modality returned zero results, zero its weight and redistribute
+    has_visual = len(visual_results) > 0
+    has_speech = len(speech_results) > 0
+    has_ocr    = len(ocr_results)    > 0
+
+    if not (has_visual and has_speech and has_ocr):
+        # At least one modality is empty — redistribute weights
+        active_count = sum([has_visual, has_speech, has_ocr])
+        if active_count == 0:
+            weights = DEFAULT_WEIGHTS.copy()
+        else:
+            per_weight = 1.0 / active_count
+            weights = {
+                "visual": per_weight if has_visual else 0.0,
+                "speech": per_weight if has_speech else 0.0,
+                "ocr":    per_weight if has_ocr    else 0.0,
+            }
+    # else: keep weights as determined by classifier/dynamic/override
 
     w_v = weights.get("visual", 0.33)
     w_s = weights.get("speech", 0.33)

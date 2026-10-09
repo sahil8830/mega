@@ -2,6 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
+# ── Suppress PaddlePaddle oneDNN/PIR warnings before ANY paddle import ──────
+# Must be set here, before any module that imports paddle is loaded.
+os.environ.setdefault("FLAGS_use_mkldnn",      "0")
+os.environ.setdefault("GLOG_minloglevel",      "3")
+os.environ.setdefault("PADDLE_CPP_LOG_LEVEL",  "ERROR")
+os.environ.setdefault("FLAGS_pir_apply_shape_optimization_pass", "0")
+
 
 from app.config import get_settings
 from app.routes.health import router as health_router

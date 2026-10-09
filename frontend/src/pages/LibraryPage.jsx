@@ -1,27 +1,78 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listVideos } from '../api/videos'
+import client from '../api/client'
 import VideoCard from '../components/VideoCard/VideoCard'
 import LoadingSpinner from '../components/LoadingSpinner/LoadingSpinner'
 import './LibraryPage.css'
 
 export default function LibraryPage() {
-  const [videos,  setVideos]  = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState('')
+  const [videos,     setVideos]     = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState('')
+  const [reindexing, setReindexing] = useState({})  // id → bool
+  const [confirming, setConfirming] = useState({})  // id → bool
+  const [deleting,   setDeleting]   = useState({})  // id → bool
   const navigate = useNavigate()
 
-  useEffect(() => {
-    let alive = true
+  const fetchVideos = () => {
+    setLoading(true)
     listVideos()
-      .then((d) => { if (alive) setVideos(d) })
-      .catch(() => { if (alive) setError('Could not reach the backend. Is it running?') })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [])
+      .then(setVideos)
+      .catch(() => setError('Could not reach the backend. Is it running?'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { fetchVideos() }, [])
 
   const handleClick = (video) => {
     if (video.status === 'indexed') navigate('/search', { state: { videoId: video._id } })
+  }
+
+  const handleReindex = async (e, video) => {
+    e.stopPropagation()
+    setReindexing(r => ({ ...r, [video._id]: true }))
+    try {
+      await client.post(`/api/videos/${video._id}/reindex`)
+      const poll = setInterval(async () => {
+        try {
+          const { data } = await client.get(`/api/videos/${video._id}/status`)
+          if (data.status === 'indexed' || data.status === 'failed') {
+            clearInterval(poll)
+            setReindexing(r => ({ ...r, [video._id]: false }))
+            fetchVideos()
+          }
+        } catch { clearInterval(poll) }
+      }, 4000)
+    } catch (err) {
+      console.error('Reindex failed:', err)
+      setReindexing(r => ({ ...r, [video._id]: false }))
+    }
+  }
+
+  const handleDeleteClick = (e, id) => {
+    e.stopPropagation()
+    setConfirming(c => ({ ...c, [id]: true }))
+  }
+
+  const handleDeleteCancel = (e, id) => {
+    e.stopPropagation()
+    setConfirming(c => ({ ...c, [id]: false }))
+  }
+
+  const handleDeleteConfirm = async (e, id) => {
+    e.stopPropagation()
+    setDeleting(d => ({ ...d, [id]: true }))
+    setConfirming(c => ({ ...c, [id]: false }))
+    try {
+      await client.delete(`/api/videos/${id}`)
+      setVideos(vs => vs.filter(v => v._id !== id))
+    } catch (err) {
+      console.error('Delete failed:', err)
+      alert('Delete failed: ' + (err.response?.data?.message || err.message))
+    } finally {
+      setDeleting(d => ({ ...d, [id]: false }))
+    }
   }
 
   return (
@@ -42,7 +93,7 @@ export default function LibraryPage() {
         {!loading && error && (
           <div className="lib-state" role="alert">
             <p className="lib-state-msg error">{error}</p>
-            <button id="library-retry-btn" className="btn btn-secondary btn-sm" onClick={() => window.location.reload()}>Retry</button>
+            <button id="library-retry-btn" className="btn btn-secondary btn-sm" onClick={fetchVideos}>Retry</button>
           </div>
         )}
 
@@ -54,17 +105,63 @@ export default function LibraryPage() {
               </svg>
             </div>
             <h2 className="lib-state-heading">No videos yet</h2>
-            <p className="lib-state-msg">Ask an admin to upload and index some videos.</p>
+            <p className="lib-state-msg">Upload a video to get started.</p>
           </div>
         )}
 
         {!loading && !error && videos.length > 0 && (
           <section aria-label="Videos">
             <div className="library-grid">
-              {videos.map((v) => <VideoCard key={v._id} video={v} onClick={() => handleClick(v)} />)}
+              {videos.map((v) => (
+                <div key={v._id} className="lib-card-wrap">
+                  <VideoCard video={v} onClick={() => handleClick(v)} />
+
+                  {/* Action row */}
+                  <div className="lib-actions">
+                    {v.status === 'indexed' && (
+                      <button
+                        id={`reindex-btn-${v._id}`}
+                        className="btn btn-ghost btn-sm lib-action-btn"
+                        onClick={(e) => handleReindex(e, v)}
+                        disabled={reindexing[v._id]}
+                        title="Re-index with improved AI settings"
+                      >
+                        {reindexing[v._id] ? '⏳ Re-indexing…' : '🔄 Re-index'}
+                      </button>
+                    )}
+
+                    {confirming[v._id] ? (
+                      <div className="lib-confirm-row" onClick={e => e.stopPropagation()}>
+                        <span className="lib-confirm-label">Delete?</span>
+                        <button
+                          id={`delete-confirm-btn-${v._id}`}
+                          className="btn btn-danger btn-sm lib-action-btn"
+                          onClick={(e) => handleDeleteConfirm(e, v._id)}
+                        >Yes</button>
+                        <button
+                          id={`delete-cancel-btn-${v._id}`}
+                          className="btn btn-ghost btn-sm lib-action-btn"
+                          onClick={(e) => handleDeleteCancel(e, v._id)}
+                        >No</button>
+                      </div>
+                    ) : (
+                      <button
+                        id={`delete-btn-${v._id}`}
+                        className="btn btn-ghost btn-sm lib-action-btn lib-delete-btn"
+                        onClick={(e) => handleDeleteClick(e, v._id)}
+                        disabled={deleting[v._id]}
+                        title="Delete this video"
+                      >
+                        {deleting[v._id] ? '⏳' : '🗑 Delete'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         )}
+
       </div>
     </main>
   )

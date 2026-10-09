@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useRef, useEffect, useState } from 'react'
 import { search as doSearch } from '../api/search'
+import { useAuthStore } from '../store/authStore'
 import './ResultsPage.css'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
@@ -29,32 +30,37 @@ function Bar({ label, weight, score, color }) {
 }
 
 export default function ResultsPage() {
-  const location = useLocation()
+  const location  = useLocation()
   const navigate  = useNavigate()
   const videoRef  = useRef(null)
+  const token     = useAuthStore(s => s.token)
 
   const state = location.state
   const [activeIdx, setActiveIdx] = useState(0)
 
-  const result  = state?.result
-  const query   = state?.query
-  const active  = result?.results?.[activeIdx]
+  const result = state?.result
+  const query  = state?.query
+  const active = result?.results?.[activeIdx]
+
+  // Build direct stream URL — token in query param so <video src> can load it
+  const videoSrc = active?.video_id
+    ? `${API_BASE}/api/videos/${active.video_id}/stream?token=${token}`
+    : null
 
   useEffect(() => {
     if (!state) navigate('/search', { replace: true })
   }, [state, navigate])
 
+  // Seek to timestamp whenever active result changes
   useEffect(() => {
     const vid = videoRef.current
     if (!vid || !active) return
-    const seek = () => { vid.currentTime = active.start_time }
-    if (vid.readyState >= 1) seek()
-    else vid.addEventListener('loadedmetadata', seek, { once: true })
-  }, [activeIdx, active])
+    const doSeek = () => { vid.currentTime = active.start_time }
+    if (vid.readyState >= 1) doSeek()
+    else vid.addEventListener('loadedmetadata', doSeek, { once: true })
+  }, [activeIdx, active?.start_time])
 
   if (!state) return null
-
-  const src = active ? `${API_BASE}/storage/videos/${active.video_id}` : undefined
 
   return (
     <main className="page results-page">
@@ -102,22 +108,37 @@ export default function ResultsPage() {
             </aside>
 
             <div className="results-main">
-              {src && (
-                <section className="player-section" aria-label="Video player">
-                  <video ref={videoRef} id="results-video-player" className="player-video"
-                    src={src} controls
-                    aria-label={`Video at ${fmt(active?.start_time ?? 0)}`} />
-                  {active && (
-                    <div className="player-bar">
-                      <span className="player-moment">{fmt(active.start_time)} → {fmt(active.end_time)}</span>
-                      <button id="results-seek-btn" className="btn btn-secondary btn-sm"
-                        onClick={() => { if (videoRef.current) { videoRef.current.currentTime = active.start_time; videoRef.current.play() } }}>
-                        ▶ Jump
-                      </button>
-                    </div>
-                  )}
-                </section>
-              )}
+              <section className="player-section" aria-label="Video player">
+                {videoSrc ? (
+                  <video
+                    key={videoSrc}
+                    ref={videoRef}
+                    id="results-video-player"
+                    className="player-video"
+                    src={videoSrc}
+                    controls
+                    aria-label={`Video at ${fmt(active?.start_time ?? 0)}`}
+                  />
+                ) : (
+                  <div className="player-loading">Loading video…</div>
+                )}
+                {active && (
+                  <div className="player-bar">
+                    <span className="player-moment">{fmt(active.start_time)} → {fmt(active.end_time)}</span>
+                    <button id="results-seek-btn" className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        if (videoRef.current) {
+                          videoRef.current.currentTime = active.start_time
+                          videoRef.current.play()
+                        }
+                      }}>
+                      ▶ Jump
+                    </button>
+                  </div>
+                )}
+              </section>
+
+
 
               {active && (
                 <section className="evidence" aria-label="Evidence">
