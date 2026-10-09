@@ -121,7 +121,14 @@ class DeleteVideoRequest(BaseModel):
 
 @router.post('/ml/delete-video', tags=['Indexing'])
 async def delete_video_index(request: DeleteVideoRequest):
+    import asyncio
     from app.services.faiss_manager import get_faiss_manager
+
     faiss_mgr = get_faiss_manager(request.user_id)
-    faiss_mgr.reset_for_video(request.video_id)
+
+    # FAISS rebuild is CPU-bound/blocking — run in thread so event loop isn't blocked
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, faiss_mgr.reset_for_video, request.video_id)
+
     return {'message': f'FAISS entries cleared for video {request.video_id}'}
+

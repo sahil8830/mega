@@ -1,32 +1,53 @@
+/* Library Page — Minimalist */
+.library-page { background:var(--bg); }
+
 .library-header {
   display:flex; align-items:flex-end; justify-content:space-between;
-  margin-bottom:36px; flex-wrap:wrap; gap:12px;
+  margin-bottom:32px; padding-bottom:24px; border-bottom:1px solid var(--border);
 }
-.library-title { font-size:clamp(1.75rem,4vw,2.25rem); font-weight:800; margin-top:6px; }
-.library-count { font-size:.875rem; color:var(--text-3); align-self:flex-end; }
-.library-grid {
-  display:grid;
-  grid-template-columns:repeat(auto-fill, minmax(260px,1fr));
-  gap:20px;
+.library-title {
+  font-size:clamp(2rem,4vw,2.75rem); font-weight:700;
+  letter-spacing:-.04em; margin:6px 0 0;
 }
+.library-count {
+  font-size:.8rem; color:var(--text-3); font-weight:600;
+  letter-spacing:.06em; text-transform:uppercase;
+}
+
+/* Empty / error state */
 .lib-state {
   display:flex; flex-direction:column; align-items:center;
-  gap:16px; padding:80px 24px; text-align:center; color:var(--text-2);
+  gap:16px; padding:80px 24px; text-align:center;
 }
-.lib-empty-icon { opacity:.25; margin-bottom:8px; }
-.lib-state-heading { font-size:1.25rem; color:var(--text); }
-.lib-state-msg { font-size:.9rem; }
+.lib-empty-icon { color:var(--text-3); opacity:.3; }
+.lib-state-heading { font-size:1.375rem; color:var(--text); font-weight:700; }
+.lib-state-msg { font-size:.9375rem; color:var(--text-2); }
 .lib-state-msg.error { color:var(--red); }
 
-.lib-card-wrap { position: relative; display: flex; flex-direction: column; gap: 8px; }
-.lib-reindex-btn { width: 100%; font-size: .75rem; padding: 6px 12px; opacity: 0.7; transition: opacity .15s; }
-.lib-reindex-btn:hover:not(:disabled) { opacity: 1; }
-.lib-reindex-btn:disabled { cursor: default; opacity: 0.5; }
+/* Grid */
+.library-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+  gap:20px;
+}
 
-.lib-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.lib-action-btn { flex: 1; font-size: .75rem; padding: 6px 10px; opacity: 0.75; transition: opacity .15s; }
-.lib-action-btn:hover:not(:disabled) { opacity: 1; }
-.lib-action-btn:disabled { cursor: default; opacity: 0.45; }
-.lib-delete-btn { color: var(--red, #f87171); }
-.lib-confirm-row { display: flex; align-items: center; gap: 6px; flex: 1; }
-.lib-confirm-label { font-size: .75rem; color: var(--text-2); white-space: nowrap; }
+.lib-card-wrap { display:flex; flex-direction:column; gap:10px; }
+
+/* Action row below each card */
+.lib-actions {
+  display:flex; align-items:center; gap:8px;
+  padding:0 4px;
+}
+.lib-action-btn {
+  font-size:.75rem; letter-spacing:.04em; text-transform:uppercase;
+  font-weight:600; display:flex; align-items:center;
+}
+.lib-delete-btn { color:var(--text-3); margin-left:auto; }
+.lib-delete-btn:hover { color:var(--red) !important; }
+
+.lib-confirm-row {
+  display:flex; align-items:center; gap:6px; width:100%;
+}
+.lib-confirm-label {
+  font-size:.8125rem; color:var(--text-2); font-weight:500;
+}

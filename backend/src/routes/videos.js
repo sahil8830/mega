@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import axios from "axios";
 import Video from "../models/Video.js";
+import Result from "../models/Result.js";
 import { indexingQueue } from "../queues/indexingQueue.js";
 import { protect } from "../middleware/auth.js";
 import { invalidateUserSearchCache } from "../utils/searchCache.js";
@@ -248,36 +249,53 @@ router.delete("/:id", protect, async (req, res) => {
       return res.status(403).json({ message: "Not authorized to delete this video." });
     }
 
+    console.log(`[Delete] Step 1: removing file from disk`);
     // 1. Delete file from disk
     const filePath = path.join(storageDir, video.filename);
     if (fs.existsSync(filePath)) {
       try { fs.unlinkSync(filePath); } catch (e) { console.warn("[Delete] File unlink:", e.message); }
     }
 
-    // 2. Clear FAISS entries in ML service (best-effort)
+    console.log(`[Delete] Step 2: clearing FAISS in ML service`);
+    // 2. Clear FAISS entries + vectors in ML service (best-effort, 10s timeout)
     try {
       await axios.post(
         `${process.env.ML_SERVICE_URL || "http://localhost:8001"}/ml/delete-video`,
-        { video_id: req.params.id, user_id: req.user._id.toString() }
+        { video_id: req.params.id, user_id: req.user._id.toString() },
+        { timeout: 10_000 }
       );
+      console.log(`[Delete] Step 2: FAISS cleared OK`);
     } catch (mlErr) {
-      console.warn("[Delete] ML FAISS clear skipped:", mlErr.message);
+      console.warn("[Delete] Step 2: ML FAISS clear skipped:", mlErr.message);
     }
 
-    // 3. Delete segment documents
+    const userId = req.user._id.toString();
+
+    console.log(`[Delete] Step 3: deleting segments from MongoDB`);
+    // 3. Delete segment documents from MongoDB
     await mongoose.connection.db.collection("segments").deleteMany(
       { videoId: new mongoose.Types.ObjectId(req.params.id) }
     );
 
-    // 4. Delete the Video document
+    console.log(`[Delete] Step 4: deleting Result docs`);
+    // 4. Delete search Results that reference this video
+    await Result.deleteMany({ videoId: req.params.id });
+
+    console.log(`[Delete] Step 5: deleting Video document`);
+    // 5. Delete the Video document
     await Video.findByIdAndDelete(req.params.id);
 
+    // 6. Invalidate Redis search cache — cached results may reference this video
+    invalidateUserSearchCache(userId).catch(() => {});
+
+    console.log(`[Delete] Done — video ${req.params.id} fully removed`);
     return res.json({ message: "Video deleted successfully.", videoId: req.params.id });
   } catch (err) {
     console.error("[Delete] Error:", err.message);
     return res.status(500).json({ message: err.message });
   }
 });
+
 
 
 export default router;

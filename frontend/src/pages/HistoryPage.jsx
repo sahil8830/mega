@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getHistory, deleteHistory } from '../api/history'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Trash2, RefreshCw, Eye, Search, Clock } from 'lucide-react'
+import { toast } from 'react-hot-toast'
+import { getHistory, getHistoryDetail, deleteHistory } from '../api/history'
 import LoadingSpinner from '../components/LoadingSpinner/LoadingSpinner'
 import './HistoryPage.css'
-
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
 function fmt(sec) {
   const m = Math.floor(sec / 60), s = Math.floor(sec % 60)
@@ -42,19 +43,15 @@ export default function HistoryPage() {
   const [pages,    setPages]    = useState(1)
   const [total,    setTotal]    = useState(0)
   const [deleting, setDeleting] = useState({})
-  const [confirm,  setConfirm]  = useState(null) // queryId to confirm delete
-  const [viewing,  setViewing]  = useState(null) // queryId being fetched
-  const [viewError, setViewError] = useState(null) // { id, msg }
+  const [confirm,  setConfirm]  = useState(null)
+  const [viewing,  setViewing]  = useState(null)
 
   const load = useCallback(async (p = 1) => {
-    setLoading(true)
-    setError('')
+    setLoading(true); setError('')
     try {
       const data = await getHistory(p, 20)
-      setItems(data.queries)
-      setTotal(data.total)
-      setPages(data.pages)
-      setPage(data.page)
+      setItems(data.queries); setTotal(data.total)
+      setPages(data.pages); setPage(data.page)
     } catch {
       setError('Could not load search history. Is the backend running?')
     } finally {
@@ -65,25 +62,19 @@ export default function HistoryPage() {
   useEffect(() => { load(1) }, [load])
 
   const handleReplay = (item) => {
-    // Re-run the query fresh on the search page
-    navigate('/search', { state: { prefill: item.rawQuery } })
+    navigate('/search', { state: { prefill: item.rawQuery, autoRun: true } })
   }
 
   const handleView = async (item) => {
     setViewing(item._id)
-    setViewError(null)
+    const toastId = toast.loading('Loading saved results…')
     try {
-      // Fetch ALL saved results for this query (not just rank=1)
       const detail = await getHistoryDetail(item._id)
       const results = detail.results
-
       if (!results || results.length === 0) {
-        // Results weren't saved (old search or save failed)
-        setViewError({ id: item._id, msg: 'No saved results found. Use Re-run to search again.' })
+        toast.error('No saved results. Use Re-run to search again.', { id: toastId })
         return
       }
-
-      // Reconstruct the full result shape that ResultsPage expects
       const mapped = results.map((r) => ({
         segment_id:       r.segmentId ?? r._id,
         video_id:         r.videoId?._id ?? r.videoId,
@@ -101,7 +92,7 @@ export default function HistoryPage() {
         },
         rank: r.rank ?? 1,
       }))
-
+      toast.success(`${mapped.length} saved results loaded`, { id: toastId })
       navigate('/results', {
         state: {
           query: item.rawQuery,
@@ -114,9 +105,7 @@ export default function HistoryPage() {
         },
       })
     } catch (err) {
-      const msg = err?.response?.data?.message ?? err?.message ?? 'Failed to load results.'
-      console.error('[History] View failed:', msg)
-      setViewError({ id: item._id, msg })
+      toast.error(err?.response?.data?.message ?? 'Failed to load results.', { id: toastId })
     } finally {
       setViewing(null)
     }
@@ -125,12 +114,14 @@ export default function HistoryPage() {
   const handleDelete = async (queryId) => {
     setDeleting(d => ({ ...d, [queryId]: true }))
     setConfirm(null)
+    const toastId = toast.loading('Deleting…')
     try {
       await deleteHistory(queryId)
       setItems(prev => prev.filter(i => i._id !== queryId))
       setTotal(t => t - 1)
+      toast.success('Removed from history', { id: toastId })
     } catch {
-      alert('Failed to delete. Please try again.')
+      toast.error('Failed to delete.', { id: toastId })
     } finally {
       setDeleting(d => ({ ...d, [queryId]: false }))
     }
@@ -139,7 +130,12 @@ export default function HistoryPage() {
   return (
     <main className="page history-page">
       <div className="page-body">
-        <header className="hist-header">
+        <motion.header
+          className="hist-header"
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
           <div>
             <p className="eyebrow">Your activity</p>
             <h1 className="hist-title">Search History</h1>
@@ -147,144 +143,143 @@ export default function HistoryPage() {
           {!loading && total > 0 && (
             <p className="hist-count">{total} search{total !== 1 ? 'es' : ''}</p>
           )}
-        </header>
+        </motion.header>
 
         {loading && <LoadingSpinner fullPage label="Loading history…" />}
 
         {!loading && error && (
           <div className="hist-state" role="alert">
             <p className="hist-state-msg error">{error}</p>
-            <button id="history-retry-btn" className="btn btn-secondary btn-sm" onClick={() => load(page)}>
-              Retry
-            </button>
+            <button id="history-retry-btn" className="btn btn-secondary btn-sm" onClick={() => load(page)}>Retry</button>
           </div>
         )}
 
         {!loading && !error && items.length === 0 && (
-          <div className="hist-state">
+          <motion.div
+            className="hist-state"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+          >
             <div className="hist-empty-icon" aria-hidden="true">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              </svg>
+              <Search size={40} strokeWidth={1.2} />
             </div>
             <h2 className="hist-state-heading">No searches yet</h2>
             <p className="hist-state-msg">Run a search and it will appear here.</p>
             <button id="history-go-search-btn" className="btn btn-primary" onClick={() => navigate('/search')}>
               Search now
             </button>
-          </div>
+          </motion.div>
         )}
 
         {!loading && !error && items.length > 0 && (
           <>
             <ul className="hist-list" aria-label="Search history">
-              {items.map((item) => {
-                const r = item.topResult
-                const videoTitle = r?.videoId?.title ?? null
-                return (
-                  <li key={item._id} className="hist-card fade-up">
-                    {/* Left — query info */}
-                    <div className="hist-card-main">
-                      <div className="hist-card-top">
-                        <ModalityDot modality={item.predictedModality} />
-                        <span className="hist-query">"{item.rawQuery}"</span>
-                        <span className="hist-time">{timeAgo(item.createdAt)}</span>
-                      </div>
-
-                      <div className="hist-card-meta">
-                        <span className="hist-tag">{item.resultCount ?? 0} result{item.resultCount !== 1 ? 's' : ''}</span>
-                        {(item.expandedVariants?.length ?? 0) > 0 && (
-                          <span className="hist-tag hist-tag--gqe">GQE</span>
-                        )}
-                        {item.predictedModality && (
-                          <span className="hist-tag">{item.predictedModality}</span>
-                        )}
-                        {videoTitle && (
-                          <span className="hist-tag hist-tag--video">📹 {videoTitle}</span>
-                        )}
-                        {r && (
-                          <span className="hist-tag hist-tag--ts">
-                            {fmt(r.startTime)} → {fmt(r.endTime)}
+              <AnimatePresence>
+                {items.map((item, idx) => {
+                  const r = item.topResult
+                  const videoTitle = r?.videoId?.title ?? null
+                  return (
+                    <motion.li
+                      key={item._id}
+                      className="hist-card"
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: -24, scale: 0.97 }}
+                      transition={{ duration: 0.3, delay: idx * 0.04 }}
+                      layout
+                    >
+                      {/* Left */}
+                      <div className="hist-card-main">
+                        <div className="hist-card-top">
+                          <ModalityDot modality={item.predictedModality} />
+                          <span className="hist-query">"{item.rawQuery}"</span>
+                          <span className="hist-time">
+                            <Clock size={11} style={{ marginRight: 3 }} />
+                            {timeAgo(item.createdAt)}
                           </span>
-                        )}
+                        </div>
+                        <div className="hist-card-meta">
+                          {(item.expandedVariants?.length ?? 0) > 0 && (
+                            <span className="hist-tag hist-tag--gqe">GQE</span>
+                          )}
+                          {videoTitle && (
+                            <span className="hist-tag hist-tag--video">📹 {videoTitle}</span>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Right — actions */}
-                    <div className="hist-card-col">
-                      <div className="hist-card-actions">
-                        <button
-                          id={`hist-view-btn-${item._id}`}
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => handleView(item)}
-                          disabled={viewing === item._id}
-                          title="View all saved results"
-                        >
-                          {viewing === item._id ? '⏳ Loading…' : 'View all'}
-                        </button>
-
-                        <button
-                          id={`hist-replay-btn-${item._id}`}
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => handleReplay(item)}
-                          title="Re-run this search"
-                        >
-                          🔁 Re-run
-                        </button>
-
-                        {confirm === item._id ? (
-                          <div className="hist-confirm">
-                            <span>Delete?</span>
-                            <button
-                              id={`hist-del-confirm-${item._id}`}
-                              className="btn btn-danger btn-sm"
-                              onClick={() => handleDelete(item._id)}
-                            >Yes</button>
-                            <button
-                              id={`hist-del-cancel-${item._id}`}
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setConfirm(null)}
-                            >No</button>
-                          </div>
-                        ) : (
-                          <button
-                            id={`hist-del-btn-${item._id}`}
-                            className="btn btn-ghost btn-sm hist-del-btn"
-                            onClick={() => setConfirm(item._id)}
-                            disabled={deleting[item._id]}
-                            title="Remove from history"
+                      {/* Right */}
+                      <div className="hist-card-col">
+                        <div className="hist-card-actions">
+                          <motion.button
+                            id={`hist-view-btn-${item._id}`}
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleView(item)}
+                            disabled={viewing === item._id}
+                            title="View all saved results"
+                            whileHover={{ scale: 1.04 }}
+                            whileTap={{ scale: 0.96 }}
                           >
-                            {deleting[item._id] ? '⏳' : '🗑'}
-                          </button>
-                        )}
-                      </div>
+                            <Eye size={14} style={{ marginRight: 4 }} />
+                            {viewing === item._id ? 'Loading…' : 'View all'}
+                          </motion.button>
 
-                      {/* Error message below action row */}
-                      {viewError?.id === item._id && (
-                        <p className="hist-view-error">{viewError.msg}</p>
-                      )}
-                    </div>
-                  </li>
-                )
-              })}
+                          <motion.button
+                            id={`hist-replay-btn-${item._id}`}
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleReplay(item)}
+                            title="Re-run this search"
+                            whileHover={{ scale: 1.04 }}
+                            whileTap={{ scale: 0.96 }}
+                          >
+                            <RefreshCw size={13} style={{ marginRight: 4 }} />
+                            Re-run
+                          </motion.button>
+
+                          {confirm === item._id ? (
+                            <div className="hist-confirm">
+                              <span>Delete?</span>
+                              <motion.button
+                                id={`hist-del-confirm-${item._id}`}
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDelete(item._id)}
+                                whileTap={{ scale: 0.95 }}
+                              >Yes</motion.button>
+                              <motion.button
+                                id={`hist-del-cancel-${item._id}`}
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setConfirm(null)}
+                                whileTap={{ scale: 0.95 }}
+                              >No</motion.button>
+                            </div>
+                          ) : (
+                            <motion.button
+                              id={`hist-del-btn-${item._id}`}
+                              className="btn btn-ghost btn-sm hist-del-btn"
+                              onClick={() => setConfirm(item._id)}
+                              disabled={deleting[item._id]}
+                              title="Remove from history"
+                              whileHover={{ scale: 1.04, color: '#f87171' }}
+                              whileTap={{ scale: 0.96 }}
+                            >
+                              {deleting[item._id] ? <Loader size={14} /> : <Trash2 size={14} />}
+                            </motion.button>
+                          )}
+                        </div>
+                      </div>
+                    </motion.li>
+                  )
+                })}
+              </AnimatePresence>
             </ul>
 
-            {/* Pagination */}
             {pages > 1 && (
               <div className="hist-pagination">
-                <button
-                  id="history-prev-btn"
-                  className="btn btn-ghost btn-sm"
-                  disabled={page <= 1}
-                  onClick={() => load(page - 1)}
-                >← Prev</button>
+                <button id="history-prev-btn" className="btn btn-ghost btn-sm"
+                  disabled={page <= 1} onClick={() => load(page - 1)}>← Prev</button>
                 <span className="hist-page-label">Page {page} of {pages}</span>
-                <button
-                  id="history-next-btn"
-                  className="btn btn-ghost btn-sm"
-                  disabled={page >= pages}
-                  onClick={() => load(page + 1)}
-                >Next →</button>
+                <button id="history-next-btn" className="btn btn-ghost btn-sm"
+                  disabled={page >= pages} onClick={() => load(page + 1)}>Next →</button>
               </div>
             )}
           </>

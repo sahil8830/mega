@@ -11,7 +11,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 from typing import Dict, List, Optional
 
 import faiss
@@ -29,7 +29,7 @@ EMBED_DIM = 512
 
 # Global registry: user_id -> FaissManager instance
 _user_managers: Dict[str, "FaissManager"] = {}
-_registry_lock = Lock()
+_registry_lock = RLock()
 
 
 def _user_index_dir(user_id: str) -> Path:
@@ -60,13 +60,16 @@ class FaissManager:
     def __init__(self, user_id: str):
         self.user_id = user_id
         self._index_dir = _user_index_dir(user_id)
-        self._lock = Lock()
+        self._lock = RLock()   # RLock allows same thread to re-acquire (prevents deadlock)
         self._visual_index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBED_DIM)
         self._speech_index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBED_DIM)
         self._ocr_index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBED_DIM)
 
         # Maps faiss_id (int) -> SegmentMeta dict - persisted as JSON
         self._meta: Dict[str, Dict] = {"visual": {}, "speech": {}, "ocr": {}}
+
+        # Raw vector store: {index_type: {str(faiss_id): [float, ...]}} - for delete rebuild
+        self._vectors: Dict[str, Dict] = {"visual": {}, "speech": {}, "ocr": {}}
 
         self._load()
 
@@ -85,6 +88,10 @@ class FaissManager:
     @property
     def _meta_path(self) -> str:
         return str(self._index_dir / "faiss_meta.json")
+
+    @property
+    def _vectors_path(self) -> str:
+        return str(self._index_dir / "faiss_vectors.json")
 
     # ─── Public API ────────────────────────────────────────────────────────────
 
@@ -125,6 +132,11 @@ class FaissManager:
             self._meta["speech"][str(s_id)] = {**base_meta, "faiss_id": s_id, "index_type": "speech"}
             self._meta["ocr"][str(o_id)] = {**base_meta, "faiss_id": o_id, "index_type": "ocr"}
 
+            # Store raw vectors for delete-rebuild support
+            self._vectors["visual"][str(v_id)] = visual_emb.astype(np.float32).tolist()
+            self._vectors["speech"][str(s_id)] = speech_emb.astype(np.float32).tolist()
+            self._vectors["ocr"][str(o_id)]    = ocr_emb.astype(np.float32).tolist()
+
             return {"visual_id": v_id, "speech_id": s_id, "ocr_id": o_id}
 
     def search(
@@ -163,13 +175,19 @@ class FaissManager:
         return results
 
     def save(self) -> None:
-        """Persist all three indices and metadata to disk."""
+        """Public thread-safe save — acquires lock then delegates."""
         with self._lock:
-            faiss.write_index(self._visual_index, self._visual_path)
-            faiss.write_index(self._speech_index, self._speech_path)
-            faiss.write_index(self._ocr_index, self._ocr_path)
-            with open(self._meta_path, "w") as f:
-                json.dump(self._meta, f)
+            self._save_locked()
+
+    def _save_locked(self) -> None:
+        """Save without acquiring lock — call only when lock is already held."""
+        faiss.write_index(self._visual_index, self._visual_path)
+        faiss.write_index(self._speech_index, self._speech_path)
+        faiss.write_index(self._ocr_index, self._ocr_path)
+        with open(self._meta_path, "w") as f:
+            json.dump(self._meta, f)
+        with open(self._vectors_path, "w") as f:
+            json.dump(self._vectors, f)
         print(f"[FAISS:{self.user_id}] Saved - visual:{self._visual_index.ntotal} "
               f"speech:{self._speech_index.ntotal} ocr:{self._ocr_index.ntotal}")
 
@@ -181,9 +199,9 @@ class FaissManager:
             "ocr_count": self._ocr_index.ntotal,
         }
 
-    def reset_for_video(self, video_id: str) -> None:
+    def delete_video(self, video_id: str) -> None:
         """
-        Remove all FAISS entries for a specific video so it can be re-indexed.
+        Remove all FAISS entries for a specific video.
         Rebuilds each index from the retained entries (all other videos).
         Saves to disk immediately.
         """
@@ -193,23 +211,23 @@ class FaissManager:
                 old_index = self._get_index(idx_type)
 
                 # Collect entries to KEEP (not belonging to this video)
-                keep = [
-                    (int(fid), m)
+                keep_fids = [
+                    int(fid)
                     for fid, m in old_meta.items()
                     if m.get("video_id") != video_id
                 ]
 
-                # Rebuild index with only kept entries
+                # Rebuild index with only kept entries using stored vectors
                 new_index = faiss.IndexFlatIP(EMBED_DIM)
                 new_meta: Dict[str, Dict] = {}
+                vec_store = self._vectors.get(idx_type, {})
 
-                for new_fid, (old_fid, m) in enumerate(keep):
-                    vec = np.zeros(EMBED_DIM, dtype=np.float32)
-                    try:
-                        old_index.reconstruct(old_fid, vec)
-                    except Exception:
-                        continue
-                    new_index.add(vec.reshape(1, -1))
+                for new_fid, old_fid in enumerate(keep_fids):
+                    vec = vec_store.get(str(old_fid))
+                    if vec is None:
+                        continue  # vector missing — skip gracefully
+                    new_index.add(np.array(vec, dtype=np.float32).reshape(1, -1))
+                    m = old_meta[str(old_fid)]
                     new_meta[str(new_fid)] = {**m, "faiss_id": new_fid}
 
                 # Replace in-memory index + meta
@@ -221,19 +239,31 @@ class FaissManager:
                     self._ocr_index = new_index
                 self._meta[idx_type] = new_meta
 
-            self.save()
-            print(f"[FAISS:{self.user_id}] Cleared video {video_id} entries. "
+                # Re-index the vector store with new faiss_ids
+                self._vectors[idx_type] = {
+                    str(new_fid): vec_store[str(old_fid)]
+                    for new_fid, old_fid in enumerate(keep_fids)
+                    if vec_store.get(str(old_fid)) is not None
+                }
+
+            self._save_locked()   # already inside self._lock — no deadlock
+            print(f"[FAISS:{self.user_id}] Deleted video {video_id}. "
                   f"Remaining: visual={self._visual_index.ntotal} "
                   f"speech={self._speech_index.ntotal} ocr={self._ocr_index.ntotal}")
 
+    def reset_for_video(self, video_id: str) -> None:
+        """Alias for delete_video — used during re-indexing flow."""
+        self.delete_video(video_id)
+
     def full_reset(self) -> None:
-        """Wipe all indices for this user. Use before a complete re-index."""
+        """Wipe all indices and vectors for this user. Use before a complete re-index."""
         with self._lock:
             self._visual_index = faiss.IndexFlatIP(EMBED_DIM)
             self._speech_index = faiss.IndexFlatIP(EMBED_DIM)
             self._ocr_index    = faiss.IndexFlatIP(EMBED_DIM)
-            self._meta = {"visual": {}, "speech": {}, "ocr": {}}
-            self.save()
+            self._meta    = {"visual": {}, "speech": {}, "ocr": {}}
+            self._vectors = {"visual": {}, "speech": {}, "ocr": {}}  # clear vector store too
+            self._save_locked()   # already inside self._lock — no deadlock
             print(f"[FAISS:{self.user_id}] Full reset complete.")
 
     def get_video_embeddings(
@@ -295,6 +325,10 @@ class FaissManager:
         if os.path.exists(self._meta_path):
             with open(self._meta_path) as f:
                 self._meta = json.load(f)
+
+        if os.path.exists(self._vectors_path):
+            with open(self._vectors_path) as f:
+                self._vectors = json.load(f)
 
         if loaded:
             print(f"[FAISS:{self.user_id}] Loaded existing indices: {loaded}")
