@@ -1,0 +1,51 @@
+/* OTP boxes */
+.otp-hint {
+  font-size: .875rem;
+  color: var(--text-3);
+  margin-bottom: 20px;
+}
+.otp-hint strong { color: var(--text); }
+
+.otp-boxes {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.otp-box {
+  width: 52px;
+  height: 60px;
+  border: 2px solid var(--border);
+  border-radius: var(--r-md);
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: var(--surface);
+  transition: border-color .15s, box-shadow .15s;
+  outline: none;
+  caret-color: transparent;
+}
+.otp-box:focus {
+  border-color: var(--text);
+  box-shadow: 0 0 0 3px rgba(10,10,10,.08);
+}
+.otp-box:not(:placeholder-shown) {
+  border-color: var(--text);
+  background: var(--bg-2);
+}
+
+.otp-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+  font-size: .8125rem;
+}
+.otp-footer .auth-link { font-size: .8125rem; }
+
+@media (max-width: 420px) {
+  .otp-box { width: 42px; height: 52px; font-size: 1.25rem; }
+  .otp-boxes { gap: 7px; }
+}

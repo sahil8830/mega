@@ -5,14 +5,16 @@ import Navbar from './components/Navbar/Navbar'
 import ProtectedRoute from './components/ProtectedRoute/ProtectedRoute'
 import LoadingSpinner from './components/LoadingSpinner/LoadingSpinner'
 
-const LandingPage  = lazy(() => import('./pages/LandingPage'))
-const LoginPage    = lazy(() => import('./pages/LoginPage'))
-const RegisterPage = lazy(() => import('./pages/RegisterPage'))
-const LibraryPage  = lazy(() => import('./pages/LibraryPage'))
-const UploadPage   = lazy(() => import('./pages/UploadPage'))
-const SearchPage   = lazy(() => import('./pages/SearchPage'))
-const ResultsPage  = lazy(() => import('./pages/ResultsPage'))
-const HistoryPage  = lazy(() => import('./pages/HistoryPage'))
+const LandingPage       = lazy(() => import('./pages/LandingPage'))
+const LoginPage         = lazy(() => import('./pages/LoginPage'))
+const RegisterPage      = lazy(() => import('./pages/RegisterPage'))
+const VerifyEmailPage   = lazy(() => import('./pages/VerifyEmailPage'))
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
+const LibraryPage       = lazy(() => import('./pages/LibraryPage'))
+const UploadPage        = lazy(() => import('./pages/UploadPage'))
+const SearchPage        = lazy(() => import('./pages/SearchPage'))
+const ResultsPage       = lazy(() => import('./pages/ResultsPage'))
+const HistoryPage       = lazy(() => import('./pages/HistoryPage'))
 
 export default function App() {
   return (
@@ -38,9 +40,11 @@ export default function App() {
       <Navbar />
       <Suspense fallback={<LoadingSpinner fullPage size="lg" label="Loading..." />}>
         <Routes>
-          <Route path="/"        element={<LandingPage />} />
-          <Route path="/login"   element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/"               element={<LandingPage />} />
+          <Route path="/login"           element={<LoginPage />} />
+          <Route path="/register"        element={<RegisterPage />} />
+          <Route path="/verify-email"    element={<VerifyEmailPage />} />
+          <Route path="/reset-password"  element={<ResetPasswordPage />} />
           <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
           <Route path="/upload"  element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
           <Route path="/search"  element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
