@@ -33,6 +33,10 @@ def _expand_window(start: float, end: float, video_duration: float = None) -> tu
     The window is grown symmetrically around the midpoint.
     If video_duration is known, the window is clamped so it never exceeds it.
     """
+    start = max(0.0, start)
+    if video_duration is not None:
+        start = min(start, video_duration)
+        end = min(end, video_duration)
     duration = end - start
     if duration >= MIN_RESULT_DURATION:
         return start, end  # already long enough
@@ -106,6 +110,7 @@ def _temporal_nms(results: list, iou_threshold: float = NMS_IOU_THRESHOLD) -> li
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=512)
+    translated_query: Optional[str] = Field(None, min_length=1, max_length=1024)
     user_id: str = Field("global", description="User's MongoDB _id — scopes search to their FAISS index.")
     representative_embeddings: Optional[List[List[float]]] = Field(
         None,
@@ -119,7 +124,7 @@ class SearchRequest(BaseModel):
     )
     top_k: int = Field(10, ge=1, le=50, description="Number of results to return")
     use_dynamic_weights: bool = Field(
-        False,
+        True,
         description="Use the trained MLP weighting module (Phase 3 dynamic weights). "
                     "Falls back to fixed weights if model is untrained.",
     )
@@ -173,6 +178,7 @@ class SearchResponse(BaseModel):
     total_candidates: int
     gqe_applied: bool
     weighting_mode: str           # "fixed" | "dynamic"
+    weighting_method: str = "fixed"
     # Phase 4 answerability fields
     answerable: bool = True
     confidence: float = 1.0
@@ -203,6 +209,19 @@ async def search_endpoint(request: SearchRequest):
     import numpy as np
     from app.services.retrieval import retrieve
     from app.services.answerability import compute_answerability, filter_by_answerability
+    from app.services.text_matching import find_text_candidates
+    from app.db import get_db
+    from bson import ObjectId
+
+    # Apply ownership/deletion scope before ranking, not after top-K selection
+    # in the Node backend (where stale videos used to consume useful slots).
+    db = get_db()
+    video_filter = {} if request.user_id == "global" else {"uploadedBy": ObjectId(request.user_id)}
+    videos = await db["videos"].find(video_filter, {"_id": 1, "duration": 1}).to_list(None)
+    video_ids = [video["_id"] for video in videos]
+    durations = {str(video["_id"]): video.get("duration") for video in videos}
+    search_query = request.translated_query or request.query
+    text_candidates = await find_text_candidates(db, search_query, video_ids)
 
     rep_embs = None
     gqe_applied = False
@@ -212,12 +231,14 @@ async def search_endpoint(request: SearchRequest):
         gqe_applied = True
 
     result = retrieve(
-        query=request.query,
+        query=search_query,
         representative_embeddings=rep_embs,
         modality_weights=request.modality_weights,
-        top_k=request.top_k,
+        top_k=max(40, request.top_k * 4),
         use_dynamic_weights=request.use_dynamic_weights,
         user_id=request.user_id,
+        allowed_video_ids=set(durations),
+        text_candidates=text_candidates,
     )
 
     raw_results = result["results"]
@@ -253,6 +274,8 @@ async def search_endpoint(request: SearchRequest):
         if confidence < request.min_confidence:
             answerable    = False
             answer_reason = "below_min_confidence"
+            answerability["answerable"] = False
+            answerability["reason"] = answer_reason
 
         # Filter results: empty if not answerable
         raw_results = filter_by_answerability(raw_results, answerability)
@@ -264,11 +287,7 @@ async def search_endpoint(request: SearchRequest):
             from app.services.faiss_manager import get_faiss_manager
             from app.services.clip_model import encode_texts
 
-            # Reuse pre-computed embeddings if available (skip redundant CLIP call)
-            if rep_embs is not None:
-                q_emb = rep_embs.mean(axis=0)          # mean of rep embeddings (512,)
-            else:
-                q_emb = encode_texts([request.query])[0]  # (512,) — only if no GQE
+            q_emb = encode_texts([search_query])[0]
             q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-8)
 
             faiss_mgr = get_faiss_manager(request.user_id)
@@ -290,26 +309,23 @@ async def search_endpoint(request: SearchRequest):
         r["start_time"], r["end_time"] = _expand_window(
             r.get("start_time", 0.0),
             r.get("end_time",   0.0),
+            durations.get(r.get("video_id")),
         )
-        # Sync coarse timestamps if they exist
-        if r.get("coarse_start") is not None:
-            r["coarse_start"], r["coarse_end"] = _expand_window(
-                r["coarse_start"], r["coarse_end"]
-            )
 
     # ── Temporal NMS — remove overlapping windows from the same video ─────────
     # Must run AFTER expansion so IoU is computed on the final 15s windows.
     # Results from different videos are never suppressed against each other.
-    raw_results = _temporal_nms(raw_results)
+    raw_results = _temporal_nms(raw_results)[:request.top_k]
 
     return SearchResponse(
-        query=result["query"],
+        query=request.query,
         results=[SegmentResult(**r) for r in raw_results],
         modality=result["modality"],
         weights=result["weights"],
         total_candidates=result["total_candidates"],
         gqe_applied=gqe_applied,
         weighting_mode=result.get("weighting_mode", "fixed"),
+        weighting_method=result.get("weighting_method", "fixed"),
         answerable=answerable,
         confidence=confidence,
         answerability_reason=answer_reason,

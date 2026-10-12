@@ -1,8 +1,10 @@
 import express from "express";
 import axios   from "axios";
 import http    from "http";
+import mongoose from "mongoose";
 import Query   from "../models/Query.js";
 import Result  from "../models/Result.js";
+import Segment from "../models/Segment.js";
 import Video   from "../models/Video.js";
 import { protect } from "../middleware/auth.js";
 import {
@@ -27,6 +29,44 @@ const gqeAxios = axios.create({
   httpAgent: mlAgent,
   timeout:   30_000,  // 30s — if flan-t5 is still loading, fall back quickly
 });
+
+/**
+ * Old FAISS/cache entries can lack video_id even though their Segment document
+ * still links to the source Video. Repair those results and omit deleted or
+ * inaccessible videos before the player receives them.
+ */
+async function resolvePlayableResults(results, userId) {
+  if (!Array.isArray(results) || results.length === 0) return [];
+
+  const segmentIds = results
+    .filter((r) => !mongoose.isValidObjectId(r.video_id) && mongoose.isValidObjectId(r.segment_id))
+    .map((r) => r.segment_id);
+  const segmentVideoIds = new Map();
+
+  if (segmentIds.length > 0) {
+    const segments = await Segment.find({ _id: { $in: segmentIds } })
+      .select("_id videoId")
+      .lean();
+    for (const segment of segments) {
+      if (segment.videoId) segmentVideoIds.set(segment._id.toString(), segment.videoId.toString());
+    }
+  }
+
+  const resolved = results.map((result) => ({
+    ...result,
+    video_id: mongoose.isValidObjectId(result.video_id)
+      ? result.video_id
+      : segmentVideoIds.get(result.segment_id) ?? "",
+  }));
+  const videoIds = [...new Set(resolved.map((r) => r.video_id).filter(mongoose.isValidObjectId))];
+  if (videoIds.length === 0) return [];
+
+  const ownedVideos = await Video.find({ _id: { $in: videoIds }, uploadedBy: userId })
+    .select("_id")
+    .lean();
+  const ownedIds = new Set(ownedVideos.map((video) => video._id.toString()));
+  return resolved.filter((r) => ownedIds.has(r.video_id));
+}
 
 
 /**
@@ -55,9 +95,19 @@ router.post("/", protect, async (req, res) => {
     // ── Level 2: Full search cache ─────────────────────────────────────────
     const cachedResult = await getSearchCache(userId, cleanQuery);
     if (cachedResult) {
-      // Persist to history async so the repeated search still appears
-      persistToMongo(cleanQuery, userId, null, cachedResult.mlData).catch(() => {});
-      return res.json({ ...cachedResult.response, fromCache: true });
+      const cachedResults = cachedResult.response?.results ?? [];
+      const playableResults = await resolvePlayableResults(cachedResults, userId);
+      if (playableResults.length === cachedResults.length) {
+        const response = { ...cachedResult.response, results: playableResults };
+        // Persist to history async so the repeated search still appears
+        const mlData = cachedResult.mlData
+          ? { ...cachedResult.mlData, results: playableResults }
+          : { ...response, results: playableResults };
+        persistToMongo(cleanQuery, userId, null, mlData).catch(() => {});
+        setSearchCache(userId, cleanQuery, { ...cachedResult, response, mlData }).catch(() => {});
+        return res.json({ ...response, fromCache: true });
+      }
+      console.warn("[Search] Cached results referenced unavailable videos; refreshing from ML service.");
     }
 
     let gqeData     = null;
@@ -91,9 +141,14 @@ router.post("/", protect, async (req, res) => {
       }
     }
 
+    if (gqeData?.translated) searchPayload.translated_query = gqeData.translated;
+
     // ── FAISS search ───────────────────────────────────────────────────────
     const mlResponse = await mlAxios.post(`/ml/search`, searchPayload);
-    const mlData     = mlResponse.data;
+    const mlData = {
+      ...mlResponse.data,
+      results: await resolvePlayableResults(mlResponse.data.results ?? [], userId),
+    };
 
     // ── Build response ─────────────────────────────────────────────────────
     const response = {
@@ -102,6 +157,8 @@ router.post("/", protect, async (req, res) => {
       results:         mlData.results ?? [],
       modality:        mlData.modality,
       weights:         mlData.weights,
+      weighting_mode:  mlData.weighting_mode,
+      weighting_method: mlData.weighting_method,
       totalCandidates: mlData.total_candidates,
       gqeApplied:      mlData.gqe_applied ?? false,
       variants:        gqeData?.variants ?? [],

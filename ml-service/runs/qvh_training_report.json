@@ -1,0 +1,94 @@
+{
+  "checkpoint": "/Users/shiro/Desktop/Mega/mega/ml-service/weights/weighting_module.pt",
+  "train_examples": 7218,
+  "validation_examples": 1550,
+  "evaluation_split": "official QVHighlights validation",
+  "dynamic": {
+    "combined_loss": 0.27181752771139145,
+    "kl_divergence": 0.18532465398311615,
+    "hard_label_cross_entropy": 0.35831040143966675,
+    "modality_label_accuracy": 0.9974193572998047,
+    "mean_weights": [
+      0.2763800024986267,
+      0.5834189653396606,
+      0.14020098745822906
+    ],
+    "per_modality": {
+      "visual": {
+        "examples": 343,
+        "recall": 0.991253674030304
+      },
+      "speech": {
+        "examples": 1207,
+        "recall": 0.9991714954376221
+      },
+      "ocr": {
+        "examples": 0,
+        "recall": null
+      }
+    }
+  },
+  "equal_fixed_weights": {
+    "combined_loss": 0.556609736289829,
+    "kl_divergence": 0.014607521705329418,
+    "hard_label_cross_entropy": 1.0986119508743286,
+    "modality_label_accuracy": 0.22129032015800476,
+    "mean_weights": [
+      0.3333333134651184,
+      0.3333333134651184,
+      0.3333333134651184
+    ],
+    "per_modality": {
+      "visual": {
+        "examples": 343,
+        "recall": 1.0
+      },
+      "speech": {
+        "examples": 1207,
+        "recall": 0.0
+      },
+      "ocr": {
+        "examples": 0,
+        "recall": null
+      }
+    }
+  },
+  "training_mean_fixed_weights": {
+    "combined_loss": 0.4915716196410358,
+    "kl_divergence": 0.004836468957364559,
+    "hard_label_cross_entropy": 0.978306770324707,
+    "modality_label_accuracy": 0.7787096500396729,
+    "mean_weights": [
+      0.3311944007873535,
+      0.3897343575954437,
+      0.2790710926055908
+    ],
+    "per_modality": {
+      "visual": {
+        "examples": 343,
+        "recall": 0.0
+      },
+      "speech": {
+        "examples": 1207,
+        "recall": 1.0
+      },
+      "ocr": {
+        "examples": 0,
+        "recall": null
+      }
+    }
+  },
+  "limitations": [
+    "Labels are derived from scores, rather than annotated modality importance.",
+    "OCR scores use query keyword heuristics; subtitle evidence is video-level.",
+    "No validation example has OCR as its dominant label; OCR performance is unmeasured.",
+    "Validation chooses the best checkpoint and is not an independent test set.",
+    "Retrieval Recall@K and temporal IoU have not been evaluated.",
+    "Inference must use the same CLIP embedding space as the archive."
+  ],
+  "epochs": 50,
+  "synthetic_samples": 0,
+  "seed": 42,
+  "training_log": "runs/qvh_full_training.log",
+  "label_generation_log": "runs/qvh_full_labels.log"
+}

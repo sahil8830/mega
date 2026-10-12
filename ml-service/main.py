@@ -26,6 +26,13 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.faiss_index_path, exist_ok=True)
     os.makedirs(settings.video_storage_path, exist_ok=True)
 
+    from app.services.weighting_module import get_weighting_model
+    try:
+        get_weighting_model("cpu")
+        print("    Weighting: trained model loaded (CPU)")
+    except Exception as exc:
+        print(f"    Weighting: fixed-weight fallback ({exc})")
+
     print("==> ML Service ready")
     print(f"    Device   : {settings.device.upper()}")
     print(f"    CLIP     : {settings.clip_model_name} ({settings.clip_pretrained})")

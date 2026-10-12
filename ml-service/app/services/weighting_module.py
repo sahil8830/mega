@@ -21,6 +21,7 @@ If the correct moment is found only by visual search -> label = [1, 0, 0], etc.
 Saved weights: ml-service/weights/weighting_module.pt
 """
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -39,6 +40,47 @@ INPUT_DIM   = QUERY_DIM + SCORE_DIM   # 515
 HIDDEN1_DIM = 256
 HIDDEN2_DIM = 64
 OUTPUT_DIM  = 3     # [w_visual, w_speech, w_ocr]
+
+# The QVHighlights checkpoint has no OCR-dominant training examples and learns
+# a strong speech prior. Use deployment-encoder semantic intent to complement
+# that score-conditioned model, rather than presenting its prior as query intent.
+INTENT_PROMPTS = (
+    ("show a person running, jumping or moving", "show what happens in the scene",
+     "find a visible object, person or action", "show the player running across the field"),
+    ("what does the speaker say", "a commentator explains and talks about the game",
+     "find spoken words in the audio", "what does the commentator say about the goal"),
+    ("read the text displayed on screen", "read the score on the scoreboard",
+     "find written words, numbers or code on a slide", "read a caption or subtitle"),
+)
+
+
+@lru_cache(maxsize=1)
+def _intent_embeddings() -> np.ndarray:
+    from app.services.clip_model import encode_texts
+    return encode_texts([prompt for group in INTENT_PROMPTS for prompt in group]).reshape(3, 4, QUERY_DIM)
+
+
+def predict_fusion_weights(query_emb: np.ndarray, modality_scores: np.ndarray,
+                           query: str = "") -> np.ndarray:
+    """Hybrid weighting: query intent plus the trained score MLP.
+
+    Prototypes use the same encoder as live queries. The original checkpoint is
+    preserved; this is zero-shot intent calibration, not retrained modality labels.
+    """
+    learned = predict_weights(query_emb, modality_scores)
+    similarities = np.einsum("mpd,d->mp", _intent_embeddings(), query_emb).max(axis=1)
+    logits = similarities / 0.05
+    intent = np.exp(logits - logits.max())
+    intent /= intent.sum()
+    if query:
+        from app.services.modality_classifier import classify_modality
+        info = classify_modality(query)
+        if sum(info.get("debug_scores", {}).values()) > 0:
+            # Explicit requests to read/speak/show complement ambiguous CLIP
+            # semantics. This existing rule-based signal is not a trained label.
+            explicit = np.array([info["weights"][name] for name in ("visual", "speech", "ocr")])
+            intent = 0.5 * intent + 0.5 * explicit
+    return (0.75 * intent + 0.25 * learned).astype(np.float32)
 
 
 class ModalityWeightingMLP(nn.Module):
@@ -87,7 +129,7 @@ _weighting_model: Optional[ModalityWeightingMLP] = None
 def get_weighting_model(device: str = "cpu") -> ModalityWeightingMLP:
     """
     Return the cached weighting module, loading weights from disk if available.
-    Falls back to a freshly-initialized (untrained) model if no weights file found.
+    Raises if no trained checkpoint exists so retrieval can use fixed weights.
     """
     global _weighting_model
     if _weighting_model is not None:
@@ -97,16 +139,24 @@ def get_weighting_model(device: str = "cpu") -> ModalityWeightingMLP:
     model = model.to(device)
 
     if os.path.exists(WEIGHTS_PATH):
-        state = torch.load(WEIGHTS_PATH, map_location=device)
+        state = torch.load(WEIGHTS_PATH, map_location=device, weights_only=True)
         model.load_state_dict(state)
         print(f"[WeightingMLP] Loaded weights from {WEIGHTS_PATH}")
     else:
-        print(f"[WeightingMLP] No trained weights found - using untrained model.")
-        print(f"               Run `python train_weighting_module.py` to train.")
+        raise FileNotFoundError(f"Trained weighting checkpoint missing: {WEIGHTS_PATH}")
 
     model.eval()
     _weighting_model = model
     return model
+
+
+def weighting_status() -> dict:
+    return {
+        "loaded": _weighting_model is not None,
+        "checkpoint_exists": os.path.isfile(WEIGHTS_PATH),
+        "checkpoint_path": WEIGHTS_PATH,
+        "fusion_method": "query_intent_and_mlp_v3",
+    }
 
 
 def predict_weights(

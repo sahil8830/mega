@@ -3,12 +3,12 @@
  *
  * Two-level cache for the search pipeline:
  *
- *   Level 1 — GQE cache  (key: gqe:v1:{queryHash})
+ *   Level 1 — GQE cache  (key: gqe:v2:{queryHash})
  *     Stores flan-t5 expansion results + CLIP representative embeddings.
  *     TTL: 7 days.  GQE is pure query → no user dependency.
  *     Savings: 5–30 s → <5 ms on cache hit.
  *
- *   Level 2 — Full search result cache  (key: search:v1:{userId}:{queryHash})
+ *   Level 2 — Full search result cache  (key: search:v4:{userId}:{queryHash})
  *     Stores the complete ranked ML result array.
  *     TTL: 30 min.  Scoped per user (FAISS namespace is per-user).
  *     Savings: 200–500 ms → <5 ms on cache hit.
@@ -46,7 +46,9 @@ function getRedis() {
 }
 
 // ─── Key Helpers ──────────────────────────────────────────────────────────────
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
+// v4 scores the original query, adds text evidence, and preserves real timestamps.
+const SEARCH_CACHE_VERSION = "v4";
 
 export function queryHash(query) {
   return crypto.createHash("sha256").update(query.trim().toLowerCase()).digest("hex");
@@ -57,11 +59,11 @@ export function gqeKey(query) {
 }
 
 export function searchKey(userId, query) {
-  return `search:${CACHE_VERSION}:${userId}:${queryHash(query)}`;
+  return `search:${SEARCH_CACHE_VERSION}:${userId}:${queryHash(query)}`;
 }
 
 export function userSearchPattern(userId) {
-  return `search:${CACHE_VERSION}:${userId}:*`;
+  return `search:${SEARCH_CACHE_VERSION}:${userId}:*`;
 }
 
 // ─── TTLs ────────────────────────────────────────────────────────────────────

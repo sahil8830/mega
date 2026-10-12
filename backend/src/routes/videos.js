@@ -47,6 +47,28 @@ const upload = multer({
   },
 });
 
+function parseByteRange(header, fileSize) {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match || (!match[1] && !match[2]) || fileSize <= 0) return null;
+
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
+    start = Math.max(fileSize - suffixLength, 0);
+    end = fileSize - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : fileSize - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) return null;
+    if (start >= fileSize) return null;
+    end = Math.min(end, fileSize - 1);
+  }
+
+  return { start, end };
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 /**
@@ -164,25 +186,41 @@ router.get("/:id/stream", protect, async (req, res) => {
     const range    = req.headers.range;
 
     if (range) {
-      const [startStr, endStr] = range.replace(/bytes=/, "").split("-");
-      const start     = parseInt(startStr, 10);
-      const end       = endStr ? parseInt(endStr, 10) : fileSize - 1;
-      const chunkSize = end - start + 1;
+      const parsedRange = parseByteRange(range, fileSize);
+      if (!parsedRange) {
+        return res.status(416).set({
+          "Content-Range": `bytes */${fileSize}`,
+          "Accept-Ranges": "bytes",
+        }).end();
+      }
 
+      const { start, end } = parsedRange;
       res.status(206).set({
         "Content-Range":  `bytes ${start}-${end}/${fileSize}`,
         "Accept-Ranges":  "bytes",
-        "Content-Length": chunkSize,
+        "Content-Length": end - start + 1,
         "Content-Type":   mimeType,
       });
-      fs.createReadStream(filePath, { start, end }).pipe(res);
+      const stream = fs.createReadStream(filePath, { start, end });
+      stream.on("error", (err) => {
+        console.error("[Stream] Read error:", err.message);
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy(err);
+      });
+      stream.pipe(res);
     } else {
       res.status(200).set({
         "Content-Length": fileSize,
         "Content-Type":   mimeType,
         "Accept-Ranges":  "bytes",
       });
-      fs.createReadStream(filePath).pipe(res);
+      const stream = fs.createReadStream(filePath);
+      stream.on("error", (err) => {
+        console.error("[Stream] Read error:", err.message);
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy(err);
+      });
+      stream.pipe(res);
     }
   } catch (err) {
     console.error("[Stream] Error:", err.message);

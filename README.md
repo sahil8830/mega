@@ -70,14 +70,66 @@ venv\Scripts\activate
 # macOS/Linux
 source venv/bin/activate
 
-pip install -r requirements.txt
+# Install dependencies; chooses NVIDIA CUDA on Windows/Linux, otherwise CPU.
+# Requires Python 3.10–3.12; Python 3.11 is recommended.
+python install.py
 cp .env.example .env      # Edit .env with your settings
 uvicorn main:app --reload --port 8001
 ```
+Whisper automatically uses MLX on Apple Silicon, PyTorch CUDA on NVIDIA
+machines, and CPU otherwise. MLX downloads its matching model on first use.
+Set `FORCE_CPU=true` to disable GPU use. `WHISPER_MLX_MODEL` optionally selects
+an MLX model repository or local path. If MLX fails, transcription falls back
+to CPU for the rest of that service session. `/ml/health` reports the active backend.
+
+Indexing batches eight chunks and up to 32 CLIP inputs per model call, with
+bulk MongoDB writes. `INDEXING_BATCH_SIZE` and `CLIP_BATCH_SIZE` control memory
+usage; reduce these if GPU memory is limited. Chunk size (7s), overlap (3s),
+four sampled frames, and OCR on every frame are retained. Pipeline logs report
+segmentation, Whisper, CLIP, OCR, and database/FAISS timings to identify bottlenecks.
+The ML service serializes indexing/reindexing and ignores duplicate submissions
+for pending videos. Run one Uvicorn worker for this in-memory model/index setup.
+Backend indexing waits up to two hours by default, including queue wait.
+
 > ML service runs at **http://localhost:8001**  
 > API docs: **http://localhost:8001/docs**
 
+The trained modality weighting model loads from
+`ml-service/weights/weighting_module.pt` at startup on CPU. Search defaults to
+dynamic weighting; set `use_dynamic_weights: false` in a search request to use
+fixed weights for comparison. `/ml/health` includes `weighting_model.loaded`
+and the checkpoint path. Restart the ML service after replacing the checkpoint.
+If the checkpoint cannot load, search falls back to fixed weights and reports
+`weighting_mode: "fixed"`. The QVHighlights checkpoint uses the OpenAI
+ViT-B-32 CLIP embedding space (`CLIP_MODEL_NAME=ViT-B-32`,
+`CLIP_PRETRAINED=openai`).
+
+Dynamic fusion reports `weighting_method: "query_intent_and_mlp_v3"`.
+It combines 75% query intent (CLIP similarity to visual/speech/OCR descriptions,
+complemented by the existing keyword classifier when explicit cues exist) with
+25% checkpoint prediction. This is hybrid calibration, not checkpoint retraining:
+the QVHighlights proxy-label checkpoint favors speech and has no OCR-dominant
+training examples. Weighting encodes the original query even when GQE supplies
+expanded embeddings, uses raw retrieval scores, and preserves relative weights
+when a modality is unavailable.
+
+Search cache v4 and expansion cache v2 bypass earlier inaccurate results.
+Expansion rejects generated code, repeated phrases and verbose answers, and
+always retains the original query. Expansions propose candidates; final cosine
+scores use the original query across all candidate modalities. Transcript/OCR
+topic matches add candidates and contribute half of each text-modality score.
+Deleted or unowned videos are excluded before ranking. Seven-second matches
+retain their indexed timestamps; longer visual refinement uses stored start/end
+times, and playback context is clamped to the video's duration. Similarity
+scores are displayed as scores rather than a probability of a correct match.
+
+The standalone OCR benchmarks and recorded results live in
+[`ocr-optimization/`](./ocr-optimization/RESULTS.md), inside this repository.
+The benchmark supports configurable frame/model paths; the application imports
+its runtime detector helper from `ml-service/app/services/ocr_acceleration.py`.
+
 ### 4. Backend (Node.js)
+
 ```bash
 cd backend
 npm install

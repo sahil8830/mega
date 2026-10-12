@@ -6,7 +6,7 @@ and fuses their scores into a single ranked result list.
 
 Two fusion modes:
   - Fixed-Weight (Phase 2 baseline): weights from modality classifier or user override
-  - Dynamic-Weight (Phase 3):        weights from trained MLP conditioned on query + scores
+  - Dynamic-Weight: query intent calibrated with the trained score-conditioned MLP
 
 Dynamic weighting is the CORE NOVEL CONTRIBUTION:
   query_emb -> MLP(query_emb || top_scores) -> [w_visual, w_speech, w_ocr]
@@ -20,37 +20,12 @@ import numpy as np
 from app.services.clip_model import encode_texts
 from app.services.faiss_manager import get_faiss_manager
 from app.services.modality_classifier import classify_modality
+from app.services.text_matching import text_coverage
 
 # Phase 2 baseline equal-weight defaults
 DEFAULT_WEIGHTS = {"visual": 0.33, "speech": 0.33, "ocr": 0.34}
 TOP_K_PER_INDEX = 20   # retrieve more than needed, then fuse and re-rank
 FINAL_TOP_K = 10       # return this many after fusion
-
-# Query prompt template — aligns with how speech/OCR were indexed
-# (prompt-wrapped before encode_texts in the pipeline)
-QUERY_PROMPT = "A video moment where a sports commentator describes: {query}"
-
-
-def _normalize_scores(results: List[Dict], score_key: str = "score") -> List[Dict]:
-    """
-    Normalize a list of result scores to [0, 1] using min-max scaling.
-    Prevents one modality from dominating due to scale differences.
-    """
-    if not results:
-        return results
-    scores = [r[score_key] for r in results]
-    min_s, max_s = min(scores), max(scores)
-    span = max_s - min_s
-    if span < 1e-8:
-        # All scores identical — assign equal normalized score (0.5)
-        for r in results:
-            r["_norm_score"] = 0.5
-    else:
-        for r in results:
-            r["_norm_score"] = (r[score_key] - min_s) / span
-    return results
-
-
 
 def _search_one_embedding(
     query_emb: np.ndarray,
@@ -110,19 +85,18 @@ def _get_dynamic_weights(
     v_score: float,
     s_score: float,
     o_score: float,
+    query: str = "",
 ) -> Dict[str, float]:
     """
-    Compute dynamic per-query fusion weights using the trained MLP.
-    Falls back to equal weights if model is untrained or throws.
+    Compute hybrid per-query fusion weights from intent and the trained MLP.
+    Errors propagate to retrieve(), which reports a fixed-weight fallback.
     """
-    from app.services.weighting_module import predict_weights
+    from app.services.weighting_module import predict_fusion_weights
     modality_scores = np.array([v_score, s_score, o_score], dtype=np.float32)
-    try:
-        w = predict_weights(query_emb, modality_scores)
-        return {"visual": float(w[0]), "speech": float(w[1]), "ocr": float(w[2])}
-    except Exception as e:
-        print(f"[Retrieval] Dynamic weighting failed: {e}. Falling back to equal weights.")
-        return DEFAULT_WEIGHTS.copy()
+    w = predict_fusion_weights(query_emb, modality_scores, query=query)
+    if not np.isfinite(w).all() or np.any(w < 0) or not np.isclose(w.sum(), 1.0):
+        raise ValueError("Weighting model returned invalid weights")
+    return {"visual": float(w[0]), "speech": float(w[1]), "ocr": float(w[2])}
 
 
 def retrieve(
@@ -132,6 +106,8 @@ def retrieve(
     top_k: int = FINAL_TOP_K,
     use_dynamic_weights: bool = False,
     user_id: str = "global",
+    allowed_video_ids: Optional[set] = None,
+    text_candidates: Optional[List[Dict]] = None,
 ) -> Dict:
     """
     Full retrieval pipeline for a user query.
@@ -161,13 +137,14 @@ def retrieve(
     # so we still call it (fast) just to get the modality LABEL for the UI.
     modality_info = classify_modality(query)
 
-    # ── Encode query with prompt wrapping ────────────────────────────────────
-    if representative_embeddings is None:
-        wrapped = QUERY_PROMPT.format(query=query)
-        embs = encode_texts([query, wrapped])    # (2, 512) — raw + wrapped
-        representative_embeddings = embs
-
-    rep_embs = np.array(representative_embeddings, dtype=np.float32)
+    # Always include the original query. Expansions only propose candidates;
+    # final scoring uses the original intent without a sports-specific prompt.
+    raw_query_emb = encode_texts([query])[0]
+    raw_query_emb = raw_query_emb / max(float(np.linalg.norm(raw_query_emb)), 1e-8)
+    rep_embs = raw_query_emb[None, :]
+    if representative_embeddings is not None:
+        extra = np.asarray(representative_embeddings, dtype=np.float32)
+        rep_embs = np.vstack([rep_embs, extra])
 
     # ── Get the user's FAISS manager ──────────────────────────────────────────
     faiss_mgr = get_faiss_manager(user_id)
@@ -181,27 +158,30 @@ def retrieve(
         speech_results = f_speech.result()
         ocr_results    = f_ocr.result()
 
-    # ── Normalize scores per modality IN PARALLEL ────────────────────────────
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        f_vn = pool.submit(_normalize_scores, visual_results)
-        f_sn = pool.submit(_normalize_scores, speech_results)
-        f_on = pool.submit(_normalize_scores, ocr_results)
-        visual_results = f_vn.result()
-        speech_results = f_sn.result()
-        ocr_results    = f_on.result()
-
     # ── Collect all segment_ids seen across modalities ────────────────────────
     all_sids = set(
         r.get("segment_id", str(r.get("faiss_id")))
         for results in [visual_results, speech_results, ocr_results]
         for r in results
     )
+    texts = {str(doc["_id"]): doc for doc in (text_candidates or [])}
+    all_sids.update(texts)
+
+    # Rescore ALL candidates in ALL modalities against the original query.
+    # No min-max scaling: a weak top match must not become a perfect 1.0.
+    def rescore(modality):
+        return [r for r in faiss_mgr.score_segments(raw_query_emb, all_sids, modality)
+                if allowed_video_ids is None or r.get("video_id") in allowed_video_ids]
+
+    visual_results = rescore("visual")
+    speech_results = rescore("speech")
+    ocr_results = rescore("ocr")
+    all_sids = {r["segment_id"] for rows in (visual_results, speech_results, ocr_results) for r in rows}
 
     # ── Build score maps per modality ─────────────────────────────────────────
     def _score_map(results: List[Dict]) -> Dict[str, float]:
-        # Use normalized score if available, fall back to raw
         return {
-            r.get("segment_id", str(r.get("faiss_id"))): r.get("_norm_score", r["score"])
+            r.get("segment_id", str(r.get("faiss_id"))): max(0.0, min(1.0, r["score"]))
             for r in results
         }
 
@@ -220,16 +200,24 @@ def retrieve(
     # ── Determine fusion weights ───────────────────────────────────────────────
     weighting_mode = "fixed"
     if use_dynamic_weights:
-        # Use the mean representative embedding as the query embedding for MLP
-        query_emb_for_mlp = rep_embs.mean(axis=0)   # (512,)
+        # Match the L2-normalized query embeddings used during training.
+        query_emb_for_mlp = np.array(raw_query_emb, dtype=np.float32)
+        query_norm = np.linalg.norm(query_emb_for_mlp)
+        if query_norm > 1e-8:
+            query_emb_for_mlp = query_emb_for_mlp / query_norm
 
-        # Use the top candidate's scores as the "representative" modality scores
-        top_v = max(v_map.values()) if v_map else 0.0
-        top_s = max(s_map.values()) if s_map else 0.0
-        top_o = max(o_map.values()) if o_map else 0.0
+        # The MLP was trained on raw similarities. Min-max normalized top
+        # scores are almost always 1, erasing query-specific evidence.
+        top_v = max((r["score"] for r in visual_results), default=0.0)
+        top_s = max((r["score"] for r in speech_results), default=0.0)
+        top_o = max((r["score"] for r in ocr_results), default=0.0)
 
-        weights = _get_dynamic_weights(query_emb_for_mlp, top_v, top_s, top_o)
-        weighting_mode = "dynamic"
+        try:
+            weights = _get_dynamic_weights(query_emb_for_mlp, top_v, top_s, top_o, query=query)
+            weighting_mode = "dynamic"
+        except Exception as exc:
+            print(f"[Retrieval] Dynamic weighting failed: {exc}. Using fixed weights.")
+            weights = modality_weights if modality_weights is not None else modality_info["weights"]
     elif modality_weights is not None:
         weights = modality_weights
     else:
@@ -247,11 +235,14 @@ def retrieve(
         if active_count == 0:
             weights = DEFAULT_WEIGHTS.copy()
         else:
-            per_weight = 1.0 / active_count
+            active = {"visual": has_visual, "speech": has_speech, "ocr": has_ocr}
+            active_total = sum(weights.get(k, 0.0) for k, present in active.items() if present)
+            # Preserve learned/override proportions, removing only unavailable
+            # evidence. Equal weights are needed only when active mass is zero.
             weights = {
-                "visual": per_weight if has_visual else 0.0,
-                "speech": per_weight if has_speech else 0.0,
-                "ocr":    per_weight if has_ocr    else 0.0,
+                k: (weights.get(k, 0.0) / active_total if active_total > 1e-8
+                    else 1.0 / active_count) if present else 0.0
+                for k, present in active.items()
             }
     # else: keep weights as determined by classifier/dynamic/override
 
@@ -266,6 +257,17 @@ def retrieve(
         s_score = s_map.get(sid, 0.0)
         o_score = o_map.get(sid, 0.0)
         fused_score = w_v * v_score + w_s * s_score + w_o * o_score
+
+        # Exact topic evidence complements CLIP's broad text similarity.
+        # Blend only when the query has literal matches in the scoped corpus.
+        # A pure visual request retains its visual contribution unchanged.
+        if texts:
+            doc = texts.get(sid, {})
+            speech_match = text_coverage(query, doc.get("transcript", ""))
+            ocr_match = text_coverage(query, doc.get("ocrText", ""))
+            fused_score = (w_v * v_score
+                           + w_s * (0.5 * s_score + 0.5 * speech_match)
+                           + w_o * (0.5 * o_score + 0.5 * ocr_match))
 
         meta = meta_map.get(sid, {})
         fused.append({
@@ -294,4 +296,5 @@ def retrieve(
         "total_candidates": len(all_sids),
         "query":            query,
         "weighting_mode":   weighting_mode,
+        "weighting_method": "query_intent_and_mlp_v3" if weighting_mode == "dynamic" else "fixed",
     }

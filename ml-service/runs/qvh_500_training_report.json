@@ -1,0 +1,16 @@
+{
+  "epochs": 20,
+  "train_samples": 500,
+  "validation_samples": 500,
+  "synthetic_samples": 0,
+  "seed": 42,
+  "checkpoint": "/Users/shiro/Desktop/Mega/mega/ml-service/weights/weighting_module.pt",
+  "checkpoint_validation_loss": 0.27827703952789307,
+  "validation_modality_label_agreement": 0.9940000176429749,
+  "mean_validation_weights": [
+    0.2967483401298523,
+    0.5616680383682251,
+    0.1415836215019226
+  ],
+  "notes": "Prototype trained against score-derived heuristic labels. OCR is a keyword heuristic; subtitle evidence is video-level. Retrieval improvement has not been evaluated. Features use the archive CLIP embedding space; deployment must use a matching encoder."
+}

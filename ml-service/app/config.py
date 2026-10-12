@@ -1,6 +1,9 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 import os
+import platform
+from importlib.util import find_spec
+from pydantic import Field, model_validator
 
 
 class Settings(BaseSettings):
@@ -22,6 +25,23 @@ class Settings(BaseSettings):
 
     # Whisper
     whisper_model_size: str = "base"
+    whisper_mlx_model: str = ""  # Optional local model path or Hugging Face repo
+
+    # Optional ONNX text detector. Preprocessing and recognition remain PaddleOCR.
+    ocr_detector_onnx_dir: str = ""
+
+    # Indexing: batch model calls without reducing temporal/frame sampling.
+    chunk_size_seconds: int = Field(7, gt=0)
+    chunk_overlap_seconds: int = Field(3, ge=0)
+    frames_per_chunk: int = Field(4, gt=0)
+    indexing_batch_size: int = Field(8, gt=0)
+    clip_batch_size: int = Field(32, gt=0)
+
+    @model_validator(mode="after")
+    def validate_overlap(self):
+        if self.chunk_overlap_seconds >= self.chunk_size_seconds:
+            raise ValueError("CHUNK_OVERLAP_SECONDS must be less than CHUNK_SIZE_SECONDS")
+        return self
 
     # Query expansion
     query_expansion_mode: str = "local"  # "local" | "openai"
@@ -37,11 +57,28 @@ class Settings(BaseSettings):
 
     @property
     def device(self) -> str:
-        """Returns 'cuda' if a GPU is available and FORCE_CPU is not set, else 'cpu'."""
+        """Prefer NVIDIA CUDA, then Apple MPS, otherwise CPU."""
         import torch  # lazy import — avoids slow torch init at config load time
         if self.force_cpu:
             return "cpu"
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    @property
+    def whisper_device(self) -> str:
+        """Keep Whisper on CPU for MPS (its sparse tensors are unsupported)."""
+        return "cuda" if self.device == "cuda" else "cpu"
+
+    @property
+    def whisper_backend(self) -> str:
+        if (not self.force_cpu and platform.system() == "Darwin"
+                and platform.machine() == "arm64" and self.device == "mps"
+                and find_spec("mlx_whisper") is not None):
+            return "mlx"
+        return "pytorch"
 
 
 

@@ -34,6 +34,7 @@ os.environ.setdefault("PADDLE_CPP_LOG_LEVEL", "ERROR")
 
 _OCR_INSTANCE = None   # PaddleOCR instance or False (disabled)
 _OCR_READY = False
+_OCR_DETECTOR_BACKEND = "paddle"
 
 
 def get_ocr_engine():
@@ -41,7 +42,7 @@ def get_ocr_engine():
     Lazy-initialize PaddleOCR on first call.
     Returns the OCR instance, or None if unavailable.
     """
-    global _OCR_INSTANCE, _OCR_READY
+    global _OCR_INSTANCE, _OCR_READY, _OCR_DETECTOR_BACKEND
 
     if _OCR_READY:
         return _OCR_INSTANCE if _OCR_INSTANCE else None
@@ -69,6 +70,15 @@ def get_ocr_engine():
 
         _OCR_INSTANCE = ocr
         print("[OCR] PaddleOCR ready.")
+        if settings.ocr_detector_onnx_dir:
+            from app.services.ocr_acceleration import accelerate_detector
+            _OCR_DETECTOR_BACKEND = accelerate_detector(
+                ocr,
+                settings.ocr_detector_onnx_dir,
+                force_cpu=settings.force_cpu,
+            )
+        else:
+            _OCR_DETECTOR_BACKEND = "paddle"
         return ocr
     except Exception as e:
         print(f"[OCR] WARNING: PaddleOCR unavailable ({type(e).__name__}: {e})")
@@ -94,7 +104,7 @@ def extract_text_from_frame(image_path: str) -> str:
         _old_stderr = sys.stderr
         sys.stderr = io.StringIO()
         try:
-            result = ocr.ocr(image_path)
+            result = list(ocr.predict(image_path))
         finally:
             captured = sys.stderr.getvalue()
             sys.stderr = _old_stderr
@@ -103,32 +113,24 @@ def extract_text_from_frame(image_path: str) -> str:
                          and "pir::ArrayAttribute" not in captured:
                 sys.stderr.write(captured)
 
-        if not result or result[0] is None:
-            return ""
-
-        lines: List[str] = []
-        for item in result[0]:
-            # New API result format: {'transcription': text, 'score': conf, ...}
-            if isinstance(item, dict):
-                text = item.get("transcription", "") or item.get("text", "")
-                score = item.get("score", 1.0)
-                if score > 0.5 and text.strip():
-                    lines.append(text.strip())
-            # Old API format: [[bbox], (text, confidence)]
-            elif isinstance(item, (list, tuple)) and len(item) >= 2:
-                text_info = item[1]
-                if isinstance(text_info, (list, tuple)) and len(text_info) >= 2:
-                    text, confidence = text_info[0], text_info[1]
-                    if confidence > 0.5 and str(text).strip():
-                        lines.append(str(text).strip())
-
-        return " ".join(lines)
+        return _parse_ocr_results(result)
 
     except Exception as e:
-        # Silently ignore all OCR per-frame failures — the pipeline continues
-        # with visual + speech modalities. The PaddlePaddle oneDNN warning
-        # 'ConvertPirAttribute2RuntimeAttribute' is a known harmless Windows issue.
+        # Report failures; indexing continues with visual + speech modalities.
+        print(f"[OCR] Frame failed ({type(e).__name__}: {e})")
         return ""
+
+
+def _parse_ocr_results(results) -> str:
+    """Read PaddleOCR 3.x text arrays, preserving confidence filtering."""
+    lines = []
+    for result in results:
+        if result is None:
+            continue
+        for text, score in zip(result.get("rec_texts", []), result.get("rec_scores", [])):
+            if float(score) > 0.5 and text.strip():
+                lines.append(text.strip())
+    return " ".join(lines)
 
 
 def extract_text_from_chunk(frame_paths: List[str]) -> str:

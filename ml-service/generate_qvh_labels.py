@@ -43,6 +43,8 @@ REPO_ROOT    = Path(__file__).parent.parent
 MOMENT_DETR  = REPO_ROOT / "moment_detr"
 DATA_DIR     = MOMENT_DETR / "data"
 FEAT_DIR     = MOMENT_DETR / "moment_detr_features" / "features"
+if not FEAT_DIR.exists():
+    FEAT_DIR = MOMENT_DETR / "features"
 
 CLIP_VISUAL_DIR  = FEAT_DIR / "clip_features"       # (N, 512) visual per video
 CLIP_SUB_DIR     = FEAT_DIR / "clip_sub_features"    # subtitle embeddings
@@ -66,12 +68,11 @@ def _build_sub_index():
     if _SUB_INDEX:
         return
     print("[Setup] Building subtitle file index (one-time scan of 329k files)...")
-    for p in CLIP_SUB_DIR.glob("qid-*.npz"):
-        # Filename: qid-{vid}_subs{N}.npz
-        name = p.stem  # e.g. qid---a6qL3eL0c_210.0_360.0_subs0
-        # Strip leading "qid-" and trailing "_subsN"
-        inner = name[4:]  # ---a6qL3eL0c_210.0_360.0_subs0
-        vid = "_subs".join(inner.split("_subs")[:-1])  # ---a6qL3eL0c_210.0_360.0
+    for p in CLIP_SUB_DIR.glob("qid*.npz"):
+        # Filename: qid{video_id}_subs{N}.npz
+        name = p.stem
+        inner = name[3:]
+        vid = inner.rsplit("_subs", 1)[0]
         _SUB_INDEX.setdefault(vid, []).append(p)
     print(f"[Setup] Subtitle index built: {len(_SUB_INDEX)} unique videos.")
 
@@ -126,7 +127,7 @@ def _load_clip_sub(vid: str) -> Optional[np.ndarray]:
     all_feats = []
     for f in files:
         d = np.load(f)
-        feats = d["features"].astype(np.float32)
+        feats = d["pooler_output"].astype(np.float32).reshape(1, -1)
         norms = np.linalg.norm(feats, axis=1, keepdims=True) + 1e-8
         all_feats.append(feats / norms)
 
@@ -184,17 +185,13 @@ def generate_labels(
     print(f"\n[{split_name}] Processing {n} samples...")
 
     # ── Batch-encode all query texts with CLIP ───────────────────────────────
-    queries = [s["query"] for s in samples]
-    print(f"[{split_name}] CLIP-encoding {n} queries (batch={batch_size})...")
+    print(f"[{split_name}] Loading precomputed query embeddings...")
     query_embs_list = []
-    for i in range(0, n, batch_size):
-        batch = queries[i:i+batch_size]
-        embs = clip_encode_fn(batch)           # (B, 512)
-        embs = embs / (np.linalg.norm(embs, axis=1, keepdims=True) + 1e-8)
-        query_embs_list.append(embs)
-        done = min(i + batch_size, n)
-        if done % 500 == 0 or done == n:
-            print(f"  Encoded {done}/{n}...")
+    for sample in samples:
+        path = CLIP_TEXT_DIR / f"qid{sample['qid']}.npz"
+        with np.load(path) as data:
+            emb = data["pooler_output"].astype(np.float32).reshape(1, -1)
+        query_embs_list.append(emb / (np.linalg.norm(emb) + 1e-8))
 
     query_embs_arr = np.vstack(query_embs_list).astype(np.float32)   # (N, 512)
 
@@ -229,13 +226,9 @@ def generate_labels(
         # ── Speech score: subtitle CLIP embeddings ────────────────────────
         sub_feats = _load_clip_sub(vid)            # (N, 512) or None
         if sub_feats is not None:
-            clip_ids = _windows_to_clip_ids(windows)
-            clip_ids = [c for c in clip_ids if c < len(sub_feats)]
-            if clip_ids:
-                gt_sub_embs = sub_feats[clip_ids]
-                speech_score = _cosine_sim_max(q_emb, gt_sub_embs)
-            else:
-                speech_score = _speech_signal(query) * 0.5
+            # Subtitle files contain sentence embeddings, not two-second clips.
+            # Without sentence timestamps, use video-level subtitle evidence.
+            speech_score = _cosine_sim_max(q_emb, sub_feats)
         else:
             speech_score = _speech_signal(query) * 0.5
             missing_speech += 1
@@ -292,7 +285,7 @@ def main(args):
 
     # Load CLIP text encoder from our pipeline
     sys.path.insert(0, str(Path(__file__).parent))
-    from app.services.clip_model import encode_texts as clip_encode
+    clip_encode = None  # Queries use matching precomputed CLIP embeddings.
 
 
     # Load annotations

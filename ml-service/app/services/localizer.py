@@ -1,8 +1,8 @@
 """
 Phase 5 - Temporal Localization Refinement.
 
-After coarse retrieval returns a segment (e.g., 30s–60s), this module
-refines to the EXACT moment of peak relevance (e.g., 34s–39s).
+Refine broad visual segments using the stored embedding timeline.
+Fine indexed segments and speech/OCR matches retain their retrieved timestamps.
 
 Strategy:
   1. Load all CLIP visual embeddings for the top result's video from FAISS
@@ -11,14 +11,9 @@ Strategy:
   4. Find the peak using a sliding window of configurable width
   5. Return refined (start_time, end_time, refined_score)
 
-Why this matters:
-  - Coarse retrieval gives 10-30 second windows (limited by FAISS granularity)
-  - Users expect timestamp-level precision ("go to 2:34" not "go to 2:00–2:30")
-  - Refinement reduces useless playback skip time by ~70%
-
 When triggered:
-  - Always on top-1 result when answerable=True
-  - Optional on top-K results (via refine_top_k parameter)
+  - Broad visual matches among top-K results (via refine_top_k)
+  - Never infer timestamps from array positions for stored video embeddings
 """
 from __future__ import annotations
 
@@ -99,7 +94,7 @@ def refine_segment(
         segment:         Coarse result dict {video_id, start_time, end_time, ...}
         faiss_manager:   FAISSManager instance for fetching stored embeddings
         video_clip_embs: (N, 512) pre-loaded clip embeddings (optional, avoids re-fetch)
-        context_window:  How many seconds around the coarse segment to search
+        context_window:  Retained for caller compatibility; search stays inside the match
         refine_window_sec: Width of the refined segment in seconds
         clip_stride:     Seconds per clip index (default 2.0)
 
@@ -119,22 +114,36 @@ def refine_segment(
     result["coarse_start"] = coarse_start
     result["coarse_end"]   = coarse_end
 
+    # Indexed seven-second chunks already have the finest available timestamps.
+    # Re-running a coarser 15s visual window cannot improve their precision and
+    # can move a correct speech/OCR hit to an unrelated scene.
+    if coarse_end - coarse_start <= refine_window_sec:
+        return result
+
+    weights = segment.get("modality_weights", {})
+    if weights and max(weights, key=weights.get) != "visual":
+        return result
+
     # ── Load clip embeddings for this video ───────────────────────────────────
     if video_clip_embs is None:
         try:
-            video_clip_embs = faiss_manager.get_video_embeddings(video_id, index="visual")
+            video_clip_embs, clip_starts, clip_ends = faiss_manager.get_video_timeline(video_id, index="visual")
         except Exception:
             video_clip_embs = None
+    else:
+        # Explicit synthetic/external arrays retain the caller-supplied stride.
+        clip_starts = np.arange(len(video_clip_embs)) * clip_stride
+        clip_ends = clip_starts + clip_stride
 
     if video_clip_embs is None or len(video_clip_embs) == 0:
         return result   # can't refine without embeddings
 
-    n_clips = len(video_clip_embs)
-    clip_starts = np.arange(n_clips) * clip_stride   # [0, 2, 4, 6, ...] seconds
+    if len(clip_starts) > 1:
+        clip_stride = max(float(np.median(np.diff(clip_starts))), 1e-8)
 
     # ── Limit search to context window around coarse segment ─────────────────
-    search_start = max(0.0, coarse_start - context_window)
-    search_end   = coarse_end + context_window
+    search_start = coarse_start
+    search_end   = coarse_end
 
     mask = (clip_starts >= search_start) & (clip_starts <= search_end)
     if not np.any(mask):
@@ -142,6 +151,7 @@ def refine_segment(
 
     local_embs   = video_clip_embs[mask]          # (M, 512)
     local_starts = clip_starts[mask]
+    local_ends = clip_ends[mask]
 
     # ── Compute cosine similarity per clip ────────────────────────────────────
     q_norm = query_emb / (np.linalg.norm(query_emb) + 1e-8)
@@ -159,11 +169,14 @@ def refine_segment(
     )
 
     refined_start = float(local_starts[start_idx])
-    refined_end   = float(local_starts[min(end_idx, len(local_starts) - 1)] + clip_stride)
+    refined_end   = float(local_ends[min(end_idx, len(local_ends) - 1)])
 
     # Enforce minimum duration
     if refined_end - refined_start < MIN_SEGMENT_DURATION:
-        refined_end = refined_start + MIN_SEGMENT_DURATION
+        refined_end = min(coarse_end, refined_start + MIN_SEGMENT_DURATION)
+
+    refined_start = max(coarse_start, refined_start)
+    refined_end = min(coarse_end, refined_end)
 
     result["start_time"]    = round(refined_start, 2)
     result["end_time"]      = round(refined_end,   2)

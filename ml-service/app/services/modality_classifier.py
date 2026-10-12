@@ -21,7 +21,7 @@ from typing import Dict
 
 # Signals that the query is primarily about what was *said* (speech/audio)
 _SPEECH_KEYWORDS = [
-    r"\bexplains?\b", r"\bsay\b", r"\bsaid\b", r"\bdiscuss(?:es|ed|ing)?\b",
+    r"\bexplain(?:s|ed|ing)?\b", r"\bsay(?:s|ing)?\b", r"\bsaid\b", r"\bdiscuss(?:es|ed|ing)?\b",
     r"\bmentions?\b", r"\btalk(?:s|ed|ing)?\b", r"\blecture(?:s|d|r)?\b",
     r"\bword\b", r"\bsentence\b", r"\bdescrib(?:es|ed|ing)?\b",
     r"\bnarrat\w+\b", r"\bpresent(?:s|ed|ing)?\b", r"\bspeak(?:s|ing)?\b",
@@ -71,6 +71,11 @@ def classify_modality(query: str) -> Dict:
     visual_score = _count_matches(q, _VISUAL_KEYWORDS)
     speech_score = _count_matches(q, _SPEECH_KEYWORDS)
     ocr_score = _count_matches(q, _OCR_KEYWORDS)
+
+    # A "person explaining ..." requests speech; the generic subject should
+    # not cancel the explicit action and turn it into a visual query.
+    if speech_score > 0 and re.search(r"\b(?:person|people|someone)\b", q):
+        visual_score = _count_matches(re.sub(r"\bperson\b", "", q), _VISUAL_KEYWORDS)
 
     total = visual_score + speech_score + ocr_score
 

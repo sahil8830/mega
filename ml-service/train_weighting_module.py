@@ -216,6 +216,9 @@ class CombinedLoss(nn.Module):
 # ─── Training ─────────────────────────────────────────────────────────────────
 
 def train(args):
+    torch.manual_seed(42)
+    np.random.seed(42)
+    torch.set_num_threads(4)
     device = "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
     print(f"\n[Train] Device: {device.upper()}")
     print(f"[Train] Epochs: {args.epochs}  LR: {args.lr}  Batch: {args.batch_size}")
@@ -232,9 +235,10 @@ def train(args):
             print(f"[Train] QVHighlights dataset: {len(qvh_ds)} real samples")
 
     # Priority 2: Real MongoDB segments
-    mongo_ds = MongoModalityDataset(args.mongodb_uri)
-    if len(mongo_ds) > 0:
-        datasets.append(mongo_ds)
+    if not args.data_dir:
+        mongo_ds = MongoModalityDataset(args.mongodb_uri)
+        if len(mongo_ds) > 0:
+            datasets.append(mongo_ds)
 
     # Priority 3: Synthetic warm-start (always include unless samples=0)
     if args.synthetic_samples > 0:
@@ -253,9 +257,15 @@ def train(args):
         combined = SyntheticModalityDataset(n_samples=10000)
 
     # ── Train/Val split ────────────────────────────────────────────────────
-    val_size = max(1, int(0.1 * len(combined)))
-    train_size = len(combined) - val_size
-    train_ds, val_ds = random_split(combined, [train_size, val_size])
+    val_path = Path(args.data_dir) / "qvhighlights_val.npz" if args.data_dir else None
+    if val_path and val_path.exists():
+        train_ds = combined
+        val_ds = QVHighlightsDataset(str(val_path))
+        train_size, val_size = len(train_ds), len(val_ds)
+    else:
+        val_size = max(1, int(0.1 * len(combined)))
+        train_size = len(combined) - val_size
+        train_ds, val_ds = random_split(combined, [train_size, val_size])
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False)

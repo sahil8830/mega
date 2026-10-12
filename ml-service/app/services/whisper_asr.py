@@ -20,24 +20,27 @@ settings = get_settings()
 def _ensure_ffmpeg_in_path() -> None:
     """
     Whisper's audio.py calls `ffmpeg` via subprocess to decode audio.
-    imageio-ffmpeg ships the binary as 'ffmpeg-win-x86_64-vX.Y.exe' (versioned name).
-    Windows PATH lookup requires the exact name 'ffmpeg.exe', so we copy it.
+    imageio-ffmpeg ships a versioned binary. Expose it with the executable
+    name Whisper invokes: ffmpeg.exe on Windows, ffmpeg on macOS/Linux.
     """
     if shutil.which("ffmpeg"):
         return  # Already available system-wide
 
     try:
         import imageio_ffmpeg
-        src = imageio_ffmpeg.get_ffmpeg_exe()          # e.g. ffmpeg-win-x86_64-v7.1.exe
+        src = imageio_ffmpeg.get_ffmpeg_exe()
         ffmpeg_dir = os.path.dirname(src)
-        dst = os.path.join(ffmpeg_dir, "ffmpeg.exe")   # the name subprocess/whisper looks for
+        executable_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+        dst = os.path.join(ffmpeg_dir, executable_name)
 
         if not os.path.exists(dst):
             import shutil as _shutil
             _shutil.copy2(src, dst)
-            print(f"[Whisper] Created ffmpeg.exe from {os.path.basename(src)}")
+            if os.name != "nt":
+                os.chmod(dst, os.stat(dst).st_mode | 0o111)
+            print(f"[Whisper] Created {executable_name} from {os.path.basename(src)}")
 
-        # Add dir to PATH so subprocess can find ffmpeg.exe
+        # Add dir to PATH so subprocess can find the platform executable.
         current_path = os.environ.get("PATH", "")
         if ffmpeg_dir not in current_path:
             os.environ["PATH"] = ffmpeg_dir + os.pathsep + current_path
@@ -54,19 +57,13 @@ _ensure_ffmpeg_in_path()
 @lru_cache(maxsize=1)
 def get_whisper_model():
     """Lazy-load and cache the Whisper model."""
-    print(f"[Whisper] Loading model '{settings.whisper_model_size}' on {settings.device}...")
-    model = whisper.load_model(settings.whisper_model_size, device=settings.device)
+    print(f"[Whisper] Loading model '{settings.whisper_model_size}' on {settings.whisper_device}...")
+    model = whisper.load_model(settings.whisper_model_size, device=settings.whisper_device)
     print("[Whisper] Model loaded.")
     return model
 
 
-def transcribe_video(video_path: str) -> List[Dict]:
-    """
-    Transcribe the full video and return word-level segments.
-
-    Returns:
-        List of dicts: [{ 'start': float, 'end': float, 'text': str }, ...]
-    """
+def _transcribe_pytorch(video_path: str) -> Dict:
     model = get_whisper_model()
 
     # Step 1: Detect language first with a quick 30-sec probe
@@ -83,7 +80,7 @@ def transcribe_video(video_path: str) -> List[Dict]:
     if task == "translate":
         print(f"[Whisper] Non-English audio ({detected_lang}) → translating to English for CLIP")
 
-    result = model.transcribe(
+    return model.transcribe(
         video_path,
         word_timestamps=True,
         verbose=False,
@@ -92,7 +89,48 @@ def transcribe_video(video_path: str) -> List[Dict]:
         language=detected_lang,
     )
 
-    # Flatten word-level segments from all top-level segments
+
+def _transcribe_mlx(video_path: str) -> Dict:
+    import mlx_whisper
+    repo = settings.whisper_mlx_model or (
+        f"mlx-community/whisper-{settings.whisper_model_size}-mlx"
+    )
+    print(f"[Whisper] Using MLX on Apple GPU: {repo}")
+    # MLX caches its model internally. A short probe detects the language before
+    # choosing English transcription or translation, as in the PyTorch path.
+    probe = mlx_whisper.transcribe(
+        video_path, path_or_hf_repo=repo, clip_timestamps="0,1",
+        task="transcribe", verbose=None,
+    )
+    language = probe["language"]
+    return mlx_whisper.transcribe(
+        video_path, path_or_hf_repo=repo, language=language,
+        task="transcribe" if language == "en" else "translate",
+        word_timestamps=True, verbose=False,
+    )
+
+
+_mlx_failed = False
+
+
+def active_whisper_backend() -> str:
+    return "pytorch" if _mlx_failed else settings.whisper_backend
+
+
+def transcribe_video(video_path: str) -> List[Dict]:
+    """Use MLX on Apple Silicon, otherwise PyTorch; return shared timestamps."""
+    global _mlx_failed
+    if active_whisper_backend() == "mlx":
+        try:
+            result = _transcribe_mlx(video_path)
+        except Exception as exc:
+            _mlx_failed = True
+            print(f"[Whisper] MLX unavailable ({exc}); falling back to CPU.")
+            result = _transcribe_pytorch(video_path)
+    else:
+        result = _transcribe_pytorch(video_path)
+
+    # Both backends return the same word/segment structure.
     segments: List[Dict] = []
     for seg in result.get("segments", []):
         # Use word-level if available

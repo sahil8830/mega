@@ -25,8 +25,8 @@ export const indexingQueue = new Queue("indexing", {
 // ─── Worker ───────────────────────────────────────────────────────────────────
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8001";
 
-// How long to wait for the pipeline to finish (default: 30 minutes)
-const MAX_WAIT_MS = parseInt(process.env.INDEXING_TIMEOUT_MS) || 30 * 60 * 1000;
+// CPU OCR on long videos can exceed 30 minutes. Include time spent queued.
+const MAX_WAIT_MS = parseInt(process.env.INDEXING_TIMEOUT_MS) || 2 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 5000; // Check MongoDB every 5 seconds
 
 /**

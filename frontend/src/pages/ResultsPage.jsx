@@ -21,7 +21,7 @@ function Bar({ label, weight, score, color }) {
         <span className="ev-bar-label">{label}</span>
         <span className="ev-bar-nums">
           <span style={{ color }} className="ev-weight">{Math.round(weight * 100)}%</span>
-          <span className="ev-score">{Math.round(score * 100)}% match</span>
+          <span className="ev-score">{Number(score).toFixed(3)} similarity</span>
         </span>
       </div>
       <div className="progress-bar">
@@ -45,12 +45,12 @@ export default function ResultsPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const playerRef  = useRef(null)   // native <video> element ref
-  const hasSeeked   = useRef(false)  // prevent onCanPlay re-seek loop
   const token = useAuthStore(s => s.token)
 
   const state = location.state
   const [activeIdx, setActiveIdx]   = useState(0)
   const [rerunLoading, setRerunLoading] = useState(false)
+  const [playbackError, setPlaybackError] = useState('')
 
   const result = state?.result
   const query = state?.query
@@ -58,32 +58,35 @@ export default function ResultsPage() {
 
   // Token-authed stream URL
   const videoSrc = active?.video_id
-    ? `${API_BASE}/api/videos/${active.video_id}/stream?token=${token}`
+    ? `${API_BASE.replace(/\/$/, '')}/api/videos/${active.video_id}/stream?token=${encodeURIComponent(token ?? '')}`
     : null
+
+  useEffect(() => {
+    setPlaybackError('')
+  }, [videoSrc, activeIdx])
 
   useEffect(() => {
     if (!state) navigate('/search', { replace: true })
   }, [state, navigate])
 
-  // onCanPlay: seek only ONCE per video load (fires repeatedly on each buffer)
-  const handleCanPlay = () => {
-    if (hasSeeked.current) return          // already seeked — ignore
-    if (playerRef.current && active?.start_time != null) {
-      playerRef.current.currentTime = active.start_time
-      hasSeeked.current = true
+  // Each selected result gets a fresh media element. Seek once metadata is
+  // available so same-video results cannot retain a stale failed seek/buffer.
+  const handleLoadedMetadata = (event) => {
+    const video = event.currentTarget
+    const target = Number(active?.start_time)
+    if (!Number.isFinite(target) || target < 0) return
+    if (Number.isFinite(video.duration) && target >= video.duration) {
+      console.warn('[Video] result timestamp exceeds media duration', {
+        target, duration: video.duration, videoId: active?.video_id,
+      })
+      setPlaybackError(
+        `This match starts at ${fmt(target)}, but the video is only ${fmt(video.duration)} long. Playing from the beginning instead.`
+      )
+      video.currentTime = 0
+      return
     }
+    video.currentTime = target
   }
-
-  // When user picks a different result, reset hasSeeked and seek if loaded
-  useEffect(() => {
-    hasSeeked.current = false              // allow next onCanPlay to seek
-    const vid = playerRef.current
-    if (!vid || active?.start_time == null) return
-    if (vid.readyState >= 2) {             // already loaded — seek immediately
-      vid.currentTime = active.start_time
-      hasSeeked.current = true
-    }
-  }, [activeIdx])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSeek = () => {
     if (playerRef.current && active?.start_time != null) {
@@ -209,7 +212,7 @@ export default function ResultsPage() {
                 <AnimatePresence mode="wait">
                   {videoSrc ? (
                     <motion.div
-                      key={videoSrc}
+                      key={`${videoSrc}:${active.segment_id ?? activeIdx}:${active.start_time ?? 0}`}
                       className="player-wrapper"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -219,8 +222,19 @@ export default function ResultsPage() {
                         ref={playerRef}
                         src={videoSrc}
                         controls
-                        onCanPlay={handleCanPlay}
-                        onError={(e) => console.error('[Video] error', e.target.error)}
+                        onLoadedMetadata={handleLoadedMetadata}
+                        onError={(event) => {
+                          const video = event.currentTarget
+                          console.error('[Video] playback failed', {
+                            error: video.error,
+                            currentTime: video.currentTime,
+                            duration: video.duration,
+                            networkState: video.networkState,
+                            videoId: active?.video_id,
+                            startTime: active?.start_time,
+                          })
+                          setPlaybackError('This video could not be played. It may be missing, unsupported by your browser, or no longer accessible.')
+                        }}
                         preload="metadata"
                         controlsList="nodownload"
                         style={{
@@ -233,9 +247,13 @@ export default function ResultsPage() {
                       />
                     </motion.div>
                   ) : (
-                    <div className="player-loading">Loading video…</div>
+                    <div className="player-loading">
+                      {active?.video_id ? 'Loading video…' : 'This result has no available video.'}
+                    </div>
                   )}
                 </AnimatePresence>
+
+                {playbackError && <p className="player-error" role="alert">{playbackError}</p>}
 
                 {active && (
                   <motion.div

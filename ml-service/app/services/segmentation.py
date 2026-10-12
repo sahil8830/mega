@@ -96,6 +96,8 @@ def segment_video(
     Returns:
         List of ChunkInfo objects, one per chunk.
     """
+    if chunk_size <= 0 or not 0 <= overlap < chunk_size or n_frames <= 0:
+        raise ValueError("Require chunk_size > overlap >= 0 and n_frames > 0")
     duration = get_video_duration(video_path)
     step = chunk_size - overlap
     chunks: List[ChunkInfo] = []
@@ -111,20 +113,10 @@ def segment_video(
         start = t
         end = min(t + chunk_size, duration)
 
-        frame_paths = _extract_frames(
-            video_path=video_path,
-            start=start,
-            end=end,
-            n_frames=n_frames,
-            output_dir=chunk_frame_dir,
-            chunk_id=chunk_id,
-        )
-
         chunks.append(ChunkInfo(
             chunk_id=chunk_id,
             start_time=round(start, 3),
             end_time=round(end, 3),
-            frame_paths=frame_paths,
         ))
 
         chunk_id += 1
@@ -134,59 +126,58 @@ def segment_video(
         if end >= duration:
             break
 
+    _extract_chunk_frames(video_path, chunks, n_frames, chunk_frame_dir)
     return chunks
 
 
-def _extract_frames(
+def _extract_chunk_frames(
     video_path: str,
-    start: float,
-    end: float,
+    chunks: List[ChunkInfo],
     n_frames: int,
     output_dir: Path,
-    chunk_id: int,
-) -> List[str]:
-    """
-    Extract n_frames evenly-spaced frames from [start, end] using OpenCV.
+) -> None:
+    """Decode once in order, retaining H.264 reference frames between samples.
 
-    Returns list of absolute paths to saved frame images.
+    Random seeks can lose reference frames in open-GOP videos. Overlapping
+    chunks share a decode pass; only requested frames are converted/saved.
     """
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    duration = end - start
-
-    if n_frames == 1:
-        sample_offsets = [duration / 2]
-    else:
-        # Evenly spaced: e.g., for 2 frames: [10%, 90%] of the chunk
-        sample_offsets = [
-            duration * (i + 1) / (n_frames + 1)
-            for i in range(n_frames)
-        ]
-
-    saved_paths: List[str] = []
-
-    for i, offset in enumerate(sample_offsets):
-        target_time = start + offset
-        target_frame = int(target_time * fps)
-
-        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-        ret, frame = cap.read()
-
-        if not ret:
-            # Try the nearest readable frame
-            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, target_frame - 1))
-            ret, frame = cap.read()
-
-        if ret:
-            # Convert BGR -> RGB and save as JPEG
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(frame_rgb)
-            out_path = str(output_dir / f"chunk{chunk_id:04d}_frame{i}.jpg")
-            pil_img.save(out_path, quality=90)
-            saved_paths.append(out_path)
-
-    cap.release()
-    return saved_paths
+    try:
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open video: {video_path}")
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        requests = []
+        for chunk in chunks:
+            duration = chunk.end_time - chunk.start_time
+            offsets = ([duration / 2] if n_frames == 1 else
+                       [duration * (i + 1) / (n_frames + 1) for i in range(n_frames)])
+            for i, offset in enumerate(offsets):
+                requests.append((int((chunk.start_time + offset) * fps), chunk.chunk_id, i))
+        requests.sort()
+        frame_number = -1
+        request_index = 0
+        while request_index < len(requests):
+            if not cap.grab():
+                raise RuntimeError(
+                    f"Video decoding stopped at frame {frame_number + 1}; "
+                    f"{len(requests) - request_index} samples remain. "
+                    "The video may be damaged or its duration inaccurate."
+                )
+            frame_number += 1
+            if frame_number < requests[request_index][0]:
+                continue
+            ret, frame = cap.retrieve()
+            if not ret:
+                raise RuntimeError(f"Cannot decode sampled frame {frame_number}")
+            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            while request_index < len(requests) and requests[request_index][0] == frame_number:
+                _, chunk_id, sample_id = requests[request_index]
+                out_path = output_dir / f"chunk{chunk_id:04d}_frame{sample_id}.jpg"
+                image.save(str(out_path), quality=90)
+                chunks[chunk_id].frame_paths.append(str(out_path))
+                request_index += 1
+    finally:
+        cap.release()
 
 
 def cleanup_chunk_frames(video_path: str) -> None:

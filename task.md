@@ -40,5 +40,6 @@
 - [x] predict_weights numpy interface: weights sum to 1.0 OK
 - [x] retrieve() dynamic mode: weighting_mode="dynamic" OK
 - [x] retrieve() fixed mode: weighting_mode="fixed" OK
-- [ ] Training: run `python train_weighting_module.py` (needs indexed videos for full training)
+- [x] Training: 50 epochs on all 7,218 QVHighlights training examples; no synthetic samples.
+- [x] Modality-label evaluation: all 1,550 official validation examples; loss 0.2718, heuristic-label agreement 99.74%. Report: `ml-service/runs/qvh_full_evaluation.json`. This is not retrieval accuracy; OCR has no dominant validation labels.
 - [ ] Ablation: run `python ablation.py` (needs indexed videos for real metrics)

@@ -179,6 +179,41 @@ class FaissManager:
         with self._lock:
             self._save_locked()
 
+    def score_segments(self, query_emb: np.ndarray, segment_ids: set,
+                       index_type: str) -> List[Dict]:
+        """Rescore the candidate union in every modality against the original query.
+
+        A candidate absent from one modality's top-K still has an embedding.
+        Its similarity must not silently become zero just because of truncation.
+        """
+        with self._lock:
+            index = self._get_index(index_type)
+            entries = [(int(fid), meta) for fid, meta in self._meta[index_type].items()
+                       if meta.get("segment_id") in segment_ids and int(fid) < index.ntotal]
+            if not entries:
+                return []
+            vectors = np.stack([index.reconstruct(fid) for fid, _ in entries])
+            norms = np.linalg.norm(vectors, axis=1)
+            scores = vectors @ query_emb
+            return [{**meta, "score": float(score)}
+                    for (_, meta), score, norm in zip(entries, scores, norms)
+                    if norm > 1e-8 and np.isfinite(score)]
+
+    def get_video_timeline(self, video_id: str, index: str = "visual") -> tuple:
+        """Return embeddings and their actual indexed time intervals together."""
+        with self._lock:
+            faiss_index = self._get_index(index)
+            entries = sorted(
+                ((int(fid), meta) for fid, meta in self._meta[index].items()
+                 if meta.get("video_id") == video_id and int(fid) < faiss_index.ntotal),
+                key=lambda item: item[1]["start_time"],
+            )
+            if not entries:
+                return np.empty((0, EMBED_DIM), np.float32), np.empty(0), np.empty(0)
+            return (np.stack([faiss_index.reconstruct(fid) for fid, _ in entries]),
+                    np.array([meta["start_time"] for _, meta in entries]),
+                    np.array([meta["end_time"] for _, meta in entries]))
+
     def _save_locked(self) -> None:
         """Save without acquiring lock — call only when lock is already held."""
         faiss.write_index(self._visual_index, self._visual_path)

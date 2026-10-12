@@ -22,6 +22,7 @@ Output:
 """
 import hashlib
 import json
+import re
 from functools import lru_cache
 from typing import Dict, List, Optional
 
@@ -36,9 +37,7 @@ settings = get_settings()
 
 # ─── Prompts ─────────────────────────────────────────────────────────────────
 _EXPANSION_PROMPT = (
-    "Generate {n} diverse search queries about the same topic as: '{query}'. "
-    "Each query should approach the topic differently. "
-    "Output only the queries, one per line, no numbering."
+    "Paraphrase this video search query without changing its meaning: {query}"
 )
 
 N_VARIANTS = 4      # fewer variants = faster CPU inference
@@ -104,7 +103,32 @@ def _translate_to_english(text: str) -> str:
 
 # ─── Core Functions ───────────────────────────────────────────────────────────
 def _query_hash(query: str) -> str:
-    return hashlib.sha256(query.strip().lower().encode()).hexdigest()
+    return hashlib.sha256(("validated-v2:" + query.strip().lower()).encode()).hexdigest()
+
+
+def _valid_variants(query: str, variants: List[str]) -> List[str]:
+    """Reject generated programs, repetitions and verbose answers before indexing."""
+    from app.services.text_matching import query_terms, term_pattern
+    terms = query_terms(query)
+    max_words = min(40, max(12, len(query.split()) * 2))
+    valid = []
+    seen = {query.casefold()}
+    for variant in variants:
+        variant = variant.strip()
+        words = variant.lower().split()
+        if not words or len(words) > max_words or variant.casefold() in seen:
+            continue
+        if re.search(r"https?://|__\w+__|\b(?:stdin|stdout|print|input)\s*[.(]|"
+                     r"\b(?:for|while|if)\b[^\n]*:|\bimport\s+\w+|[{}=]", variant):
+            continue
+        trigrams = list(zip(words, words[1:], words[2:]))
+        if len(trigrams) != len(set(trigrams)):
+            continue
+        if terms and not any(re.search(term_pattern(term), variant, re.IGNORECASE) for term in terms):
+            continue
+        seen.add(variant.casefold())
+        valid.append(variant)
+    return valid[:N_VARIANTS]
 
 
 def _generate_variants_local(query: str) -> List[str]:
@@ -115,10 +139,10 @@ def _generate_variants_local(query: str) -> List[str]:
     outputs = pipe(
         prompt,
         num_return_sequences=N_VARIANTS,
-        do_sample=True,
-        temperature=0.8,
-        top_p=0.9,
-        max_new_tokens=128,   # reduced from 256 for speed
+        do_sample=False,
+        num_beams=N_VARIANTS,
+        no_repeat_ngram_size=3,
+        max_new_tokens=48,
     )
 
     variants = []
@@ -138,7 +162,7 @@ def _generate_variants_local(query: str) -> List[str]:
             seen.add(v)
             unique.append(v)
 
-    return unique[:N_VARIANTS] if unique else [query]
+    return _valid_variants(query, unique)
 
 
 def _cluster_and_select(
@@ -153,7 +177,7 @@ def _cluster_and_select(
       - representative_embeddings: np.ndarray (K, 512)
       - all_embeddings: np.ndarray (N+1, 512)
     """
-    all_texts = [query] + variants
+    all_texts = [query] + _valid_variants(query, variants)
     all_embs = encode_texts(all_texts)   # (N+1, 512)
 
     k = min(N_CLUSTERS, len(all_texts))
@@ -167,8 +191,10 @@ def _cluster_and_select(
     km = KMeans(n_clusters=k, random_state=42, n_init=10)
     labels = km.fit_predict(all_embs)
 
-    representatives = []
-    rep_embs = []
+    # The original query must survive clustering even if generated alternatives
+    # form larger clusters; it is always the first representative.
+    representatives = [query]
+    rep_embs = [all_embs[0]]
     for cluster_id in range(k):
         cluster_mask = labels == cluster_id
         cluster_indices = np.where(cluster_mask)[0]
@@ -177,8 +203,9 @@ def _cluster_and_select(
         centroid = km.cluster_centers_[cluster_id]
         dists = np.linalg.norm(all_embs[cluster_indices] - centroid, axis=1)
         closest = cluster_indices[np.argmin(dists)]
-        representatives.append(all_texts[closest])
-        rep_embs.append(all_embs[closest])
+        if closest != 0 and len(representatives) < N_CLUSTERS:
+            representatives.append(all_texts[closest])
+            rep_embs.append(all_embs[closest])
 
     return {
         "representatives": representatives,
@@ -235,6 +262,8 @@ async def expand_query(query: str) -> Dict:
         print(f"[GQE] Variant generation failed: {e}. Falling back to original query only.")
         variants = []
 
+    variants = _valid_variants(query, variants)
+
     # ── Cluster + select representatives (also CPU-bound) ─────────────────────
     cluster_result = await loop.run_in_executor(
         None, _cluster_and_select, query, variants
@@ -256,7 +285,8 @@ async def expand_query(query: str) -> Dict:
     )
 
     return {
-        "original": query,
+        "original": original_query,
+        "translated": query if query != original_query else None,
         "variants": variants,
         "representatives": representatives,
         "representative_embeddings": rep_embs,

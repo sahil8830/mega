@@ -21,6 +21,7 @@ Pipeline steps:
 """
 import os
 import traceback
+from time import perf_counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ import sys
 import numpy as np
 from PIL import Image
 from bson import ObjectId
+from pymongo import UpdateOne
 
 # Force UTF-8 output so Unicode chars don't crash on Windows cp1252 terminals
 if hasattr(sys.stdout, 'reconfigure'):
@@ -85,14 +87,16 @@ async def run_indexing_pipeline(
     try:
         # ── Step 1: Temporal Segmentation ──────────────────────────────────────
         print("[Pipeline] Step 1/5: Temporal segmentation...")
+        started = stage_started = perf_counter()
         chunks: List[ChunkInfo] = segment_video(
             video_path=video_path,
-            chunk_size=int(os.getenv("CHUNK_SIZE_SECONDS", "7")),
-            overlap=int(os.getenv("CHUNK_OVERLAP_SECONDS", "3")),
-            n_frames=int(os.getenv("FRAMES_PER_CHUNK", "4")),
+            chunk_size=settings.chunk_size_seconds,
+            overlap=settings.chunk_overlap_seconds,
+            n_frames=settings.frames_per_chunk,
         )
 
-        print(f"[Pipeline]   -> {len(chunks)} chunks created")
+        print(f"[Pipeline]   -> {len(chunks)} chunks created in {perf_counter() - stage_started:.1f}s")
+        stage_started = perf_counter()
 
         # ── Step 2: Whisper ASR (full video, then map to chunks) ───────────────
         print("[Pipeline] Step 2/5: Whisper transcription...")
@@ -104,23 +108,19 @@ async def run_indexing_pipeline(
         print(f"[Pipeline]   -> {len(transcript_segments)} words transcribed, "
               f"{non_empty}/{len(chunks)} chunks have speech")
 
+        print(f"[Pipeline] Whisper: {perf_counter() - stage_started:.1f}s")
+
         # ── Steps 3a-g: Per-chunk processing ───────────────────────────────────
         print(f"[Pipeline] Step 3/5: Processing {len(chunks)} chunks (CLIP + OCR + FAISS + MongoDB)...")
         faiss_mgr = get_faiss_manager(user_id)
-        inserted_ids = []
-
-        for chunk in chunks:
-            segment_doc = await _process_chunk(
-                chunk=chunk,
-                transcript=chunk_transcripts.get(chunk.chunk_id, ""),
-                video_id=video_id,
-                db=db,
-                faiss_mgr=faiss_mgr,
-            )
-            inserted_ids.append(segment_doc)
-
-            if (chunk.chunk_id + 1) % 5 == 0:
-                print(f"[Pipeline]   -> {chunk.chunk_id + 1}/{len(chunks)} chunks done")
+        timings = {"clip": 0.0, "ocr": 0.0, "database": 0.0}
+        for offset in range(0, len(chunks), settings.indexing_batch_size):
+            batch = chunks[offset:offset + settings.indexing_batch_size]
+            await _process_batch(batch, chunk_transcripts, video_id, db, faiss_mgr, timings)
+            done = offset + len(batch)
+            print(f"[Pipeline][{video_id}]   -> {done}/{len(chunks)} chunks done "
+                  f"(CLIP {timings['clip']:.1f}s, OCR {timings['ocr']:.1f}s, "
+                  f"database/FAISS {timings['database']:.1f}s)")
 
         print(f"[Pipeline]   -> All {len(chunks)} chunks processed")
 
@@ -144,7 +144,7 @@ async def run_indexing_pipeline(
         )
 
         stats = faiss_mgr.stats()
-        print(f"\n[Pipeline] DONE! {len(chunks)} segments indexed.")
+        print(f"\n[Pipeline] DONE! {len(chunks)} segments indexed in {perf_counter() - started:.1f}s.")
         print(f"[Pipeline] FAISS: visual={stats['visual_count']} "
               f"speech={stats['speech_count']} ocr={stats['ocr_count']}")
 
@@ -168,95 +168,89 @@ async def run_indexing_pipeline(
         return IndexingResult(video_id=video_id, status="failed", error=str(e))
 
 
-async def _process_chunk(
-    chunk: ChunkInfo,
-    transcript: str,
-    video_id: str,
-    db,
-    faiss_mgr,
-) -> str:
-    """
-    Process a single chunk: visual embedding -> speech embedding -> OCR -> FAISS -> MongoDB.
-    Returns the MongoDB inserted segment _id as string.
-    """
-    # ── Visual embedding ────────────────────────────────────────────────────────
-    frame_images = []
-    for path in chunk.frame_paths:
-        try:
-            frame_images.append(Image.open(path).convert("RGB"))
-        except Exception:
-            pass  # Skip unreadable frames
+async def _process_batch(chunks, transcripts, video_id, db, faiss_mgr, timings):
+    """Batch CLIP inference and MongoDB writes; retain each chunk's timestamps."""
+    visual = {chunk.chunk_id: np.zeros(512, dtype=np.float32) for chunk in chunks}
+    images, owners = [], []
+    embeddings = {chunk.chunk_id: [] for chunk in chunks}
+    clip_started = perf_counter()
 
-    if frame_images:
-        frame_embs = encode_images(frame_images)        # (N, 512)
-        visual_emb = mean_pool(frame_embs)              # (512,)
-    else:
-        visual_emb = np.zeros(512, dtype=np.float32)
+    def encode_pending():
+        if images:
+            vectors = encode_images(images)
+            for owner, vector in zip(owners, vectors):
+                embeddings[owner].append(vector)
+            for image in images:
+                image.close()
+            images.clear()
+            owners.clear()
 
-    # ── Speech embedding ────────────────────────────────────────────────────────
-    # Wrap in a CLIP-friendly prompt: aligns with image-caption training
-    # distribution and dramatically improves text-to-image similarity scores.
-    if transcript.strip():
-        speech_prompt = f"A sports commentator says: {transcript.strip()}"
-    else:
-        speech_prompt = ""
-    speech_embs = encode_texts([speech_prompt])         # (1, 512)
-    speech_emb = speech_embs[0]                        # (512,) - zero if empty
+    for chunk in chunks:
+        for path in chunk.frame_paths:
+            try:
+                with Image.open(path) as image:
+                    images.append(image.convert("RGB"))
+                owners.append(chunk.chunk_id)
+            except (OSError, ValueError):
+                continue
+            if len(images) >= settings.clip_batch_size:
+                encode_pending()
+    encode_pending()
+    for chunk_id, vectors in embeddings.items():
+        if vectors:
+            visual[chunk_id] = mean_pool(np.stack(vectors))
+    timings["clip"] += perf_counter() - clip_started
+
+    ocr_started = perf_counter()
+    ocr_texts = [extract_text_from_chunk(chunk.frame_paths) for chunk in chunks]
+    timings["ocr"] += perf_counter() - ocr_started
+    speech_texts = [transcripts.get(chunk.chunk_id, "") for chunk in chunks]
+    prompts = [f"A sports commentator says: {text.strip()}" if text.strip() else ""
+               for text in speech_texts]
+    prompts += [f"On-screen text reads: {text.strip()}" if text.strip() else ""
+                for text in ocr_texts]
+    clip_started = perf_counter()
+    text_vectors = []
+    for offset in range(0, len(prompts), settings.clip_batch_size):
+        text_vectors.extend(encode_texts(prompts[offset:offset + settings.clip_batch_size]))
+    timings["clip"] += perf_counter() - clip_started
+
+    database_started = perf_counter()
+    docs = []
+    for i, chunk in enumerate(chunks):
+        docs.append({
+            "_id": ObjectId(), "videoId": ObjectId(video_id),
+            "chunkId": chunk.chunk_id, "startTime": chunk.start_time,
+            "endTime": chunk.end_time, "framePaths": chunk.frame_paths,
+            "visualEmbedding": visual[chunk.chunk_id].tolist(),
+            "transcript": speech_texts[i], "speechEmbedding": text_vectors[i].tolist(),
+            "ocrText": ocr_texts[i], "ocrEmbedding": text_vectors[len(chunks) + i].tolist(),
+            "faissVisualId": None, "faissSpeechId": None, "faissOcrId": None,
+            "createdAt": datetime.now(timezone.utc),
+        })
+    await db["segments"].insert_many(docs)
+    updates = []
+    for i, (chunk, doc) in enumerate(zip(chunks, docs)):
+        ids = faiss_mgr.add_segment(
+            visual_emb=visual[chunk.chunk_id], speech_emb=text_vectors[i],
+            ocr_emb=text_vectors[len(chunks) + i], video_id=video_id,
+            segment_id=str(doc["_id"]), chunk_id=chunk.chunk_id,
+            start_time=chunk.start_time, end_time=chunk.end_time,
+        )
+        updates.append(UpdateOne({"_id": doc["_id"]}, {"$set": {
+            "faissVisualId": ids["visual_id"], "faissSpeechId": ids["speech_id"],
+            "faissOcrId": ids["ocr_id"],
+        }}))
+    await db["segments"].bulk_write(updates)
+    timings["database"] += perf_counter() - database_started
+    return [str(doc["_id"]) for doc in docs]
 
 
-    # ── OCR text + OCR embedding ───────────────────────────────────────────────
-    ocr_text = extract_text_from_chunk(chunk.frame_paths)
-    # Wrap OCR in a CLIP-friendly prompt
-    if ocr_text.strip():
-        ocr_prompt = f"On-screen text reads: {ocr_text.strip()}"
-    else:
-        ocr_prompt = ""
-    ocr_embs = encode_texts([ocr_prompt])               # (1, 512)
-    ocr_emb = ocr_embs[0]                              # (512,) - zero if empty
-
-    # ── Insert Segment to MongoDB first (to get _id for FAISS metadata) ────────
-    segment_doc = {
-        "videoId": ObjectId(video_id),
-        "chunkId": chunk.chunk_id,
-        "startTime": chunk.start_time,
-        "endTime": chunk.end_time,
-        "framePaths": chunk.frame_paths,
-        "visualEmbedding": visual_emb.tolist(),
-        "transcript": transcript,
-        "speechEmbedding": speech_emb.tolist(),
-        "ocrText": ocr_text,
-        "ocrEmbedding": ocr_emb.tolist(),
-        "faissVisualId": None,
-        "faissSpeechId": None,
-        "faissOcrId": None,
-        "createdAt": datetime.now(timezone.utc),
-    }
-    result = await db["segments"].insert_one(segment_doc)
-    segment_id = str(result.inserted_id)
-
-    # ── Add to FAISS indices ────────────────────────────────────────────────────
-    faiss_ids = faiss_mgr.add_segment(
-        visual_emb=visual_emb,
-        speech_emb=speech_emb,
-        ocr_emb=ocr_emb,
-        video_id=video_id,
-        segment_id=segment_id,
-        chunk_id=chunk.chunk_id,
-        start_time=chunk.start_time,
-        end_time=chunk.end_time,
-    )
-
-    # ── Update segment with FAISS IDs ──────────────────────────────────────────
-    await db["segments"].update_one(
-        {"_id": result.inserted_id},
-        {"$set": {
-            "faissVisualId": faiss_ids["visual_id"],
-            "faissSpeechId": faiss_ids["speech_id"],
-            "faissOcrId": faiss_ids["ocr_id"],
-        }},
-    )
-
-    return segment_id
+async def _process_chunk(chunk, transcript, video_id, db, faiss_mgr):
+    """Compatibility wrapper for callers processing a single chunk."""
+    ids = await _process_batch([chunk], {chunk.chunk_id: transcript}, video_id, db,
+                               faiss_mgr, {"clip": 0.0, "ocr": 0.0, "database": 0.0})
+    return ids[0]
 
 
 async def _update_video_status(db, video_id: str, status: str, error: str = None):

@@ -11,7 +11,7 @@ to avoid re-encoding them.
 """
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 router = APIRouter()
 
@@ -22,6 +22,7 @@ class QueryExpandRequest(BaseModel):
 
 class QueryExpandResponse(BaseModel):
     original: str
+    translated: Optional[str] = None
     variants: List[str]
     representatives: List[str]
     representative_embeddings: List[List[float]]   # shape (K, 512)
@@ -52,6 +53,7 @@ async def expand_query_endpoint(request: QueryExpandRequest):
 
     return QueryExpandResponse(
         original=result["original"],
+        translated=result.get("translated"),
         variants=result["variants"],
         representatives=result["representatives"],
         representative_embeddings=result["representative_embeddings"],

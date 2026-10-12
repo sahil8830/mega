@@ -9,8 +9,15 @@ isolated FAISS index namespace (faiss/{user_id}/).
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+# The model singletons and local GPU belong to one ML service process.
+# Protect both indexing and reindex cleanup, including requests outside BullMQ.
+_indexing_lock = asyncio.Lock()
+_pending_videos = set()
 
 
 class IndexRequest(BaseModel):
@@ -28,14 +35,24 @@ class IndexResponse(BaseModel):
 async def _pipeline_task(video_id: str, video_filename: str, user_id: str):
     """Background task wrapper — imports pipeline lazily to keep server startup fast."""
     from app.services.indexing_pipeline import run_indexing_pipeline
-    await run_indexing_pipeline(
-        video_id=video_id,
-        video_filename=video_filename,
-        user_id=user_id,
-    )
+    try:
+        async with _indexing_lock:
+            await run_indexing_pipeline(
+                video_id=video_id, video_filename=video_filename, user_id=user_id,
+            )
+    finally:
+        _pending_videos.discard(video_id)
 
 
 async def _reindex_task(video_id: str, video_filename: str, user_id: str):
+    try:
+        async with _indexing_lock:
+            await _run_reindex(video_id, video_filename, user_id)
+    finally:
+        _pending_videos.discard(video_id)
+
+
+async def _run_reindex(video_id: str, video_filename: str, user_id: str):
     """Clear existing FAISS entries for this video, then re-run the pipeline."""
     from app.services.faiss_manager import get_faiss_manager
     from app.services.indexing_pipeline import run_indexing_pipeline
@@ -76,6 +93,11 @@ async def index_video(request: IndexRequest, background_tasks: BackgroundTasks):
     The video is indexed into a per-user FAISS namespace (faiss/{user_id}/)
     so each user's search space is fully isolated.
     """
+    if request.video_id in _pending_videos:
+        return IndexResponse(video_id=request.video_id, status="indexing",
+                             message="This video is already queued or indexing.")
+    _pending_videos.add(request.video_id)
+    logger.info("Queued indexing for video %s", request.video_id)
     background_tasks.add_task(
         _pipeline_task,
         video_id=request.video_id,
@@ -100,6 +122,10 @@ async def reindex_video(request: IndexRequest, background_tasks: BackgroundTasks
 
     Returns immediately. Poll /api/videos/:id/status for completion.
     """
+    if request.video_id in _pending_videos:
+        return IndexResponse(video_id=request.video_id, status="indexing",
+                             message="This video is already queued or indexing.")
+    _pending_videos.add(request.video_id)
     background_tasks.add_task(
         _reindex_task,
         video_id=request.video_id,
