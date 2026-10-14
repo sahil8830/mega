@@ -22,8 +22,11 @@ os.environ["FLAGS_pir_apply_shape_optimization_pass"] = "0"
 import sys
 import warnings
 from typing import List
+from pathlib import Path
+from time import perf_counter
 
 from app.config import get_settings
+from app.services.ocr_runtime import active_ocr_run, instrument_ocr
 
 settings = get_settings()
 
@@ -79,6 +82,7 @@ def get_ocr_engine():
             )
         else:
             _OCR_DETECTOR_BACKEND = "paddle"
+        instrument_ocr(ocr)
         return ocr
     except Exception as e:
         print(f"[OCR] WARNING: PaddleOCR unavailable ({type(e).__name__}: {e})")
@@ -98,6 +102,14 @@ def extract_text_from_frame(image_path: str) -> str:
     if ocr is None:
         return ""
 
+    run = active_ocr_run()
+    key = run.key(image_path, ocr) if run is not None else None
+    if run is not None:
+        cached = run.lookup(key)
+        if cached is not None:
+            return cached
+        run.inferences += 1
+    started = perf_counter()
     try:
         # Suppress the per-frame oneDNN stderr noise
         import io
@@ -113,9 +125,22 @@ def extract_text_from_frame(image_path: str) -> str:
                          and "pir::ArrayAttribute" not in captured:
                 sys.stderr.write(captured)
 
-        return _parse_ocr_results(result)
+        text = _parse_ocr_results(result)
+        if run is not None:
+            # A failure is never cached. Empty successful text is safe to reuse.
+            # Avoid caching a call that switched detector backends partway through.
+            valid = bool(result) and all(r is not None and "error" not in r for r in result)
+            if valid and key is not None and key[:2] == run.engine_token(ocr):
+                run.remember(key, text)
+            elapsed = perf_counter() - started
+            if elapsed >= 5:
+                boxes = sum(len(r.get("rec_texts", [])) for r in result if r is not None)
+                print(f"[OCR] Slow frame {Path(image_path).name}: {elapsed:.1f}s, {boxes} recognized regions")
+        return text
 
     except Exception as e:
+        if run is not None:
+            run.failures += 1
         # Report failures; indexing continues with visual + speech modalities.
         print(f"[OCR] Frame failed ({type(e).__name__}: {e})")
         return ""

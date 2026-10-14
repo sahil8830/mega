@@ -3,6 +3,7 @@ const STATUS_CONFIG = {
   indexing: { label: 'Indexing', className: 'badge badge-indexing', dot: '◌' },
   indexed:  { label: 'Ready',    className: 'badge badge-indexed',  dot: '●' },
   error:    { label: 'Error',    className: 'badge badge-error',     dot: '●' },
+  failed:   { label: 'Error',    className: 'badge badge-error',     dot: '●' },
 }
 
 export default function StatusBadge({ status }) {

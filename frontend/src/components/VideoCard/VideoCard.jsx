@@ -40,7 +40,7 @@ export default function VideoCard({ video, onClick }) {
           <StatusBadge status={video.status} />
         </div>
         <p className="video-card-meta">{formatSize(video.sizeBytes)} · {formatDate(video.createdAt)}</p>
-        {video.errorMessage && <p className="video-card-error" role="alert">{video.errorMessage}</p>}
+        {['failed', 'error'].includes(video.status) && video.errorMessage && <p className="video-card-error" role="alert">{video.errorMessage}</p>}
       </div>
     </article>
   )

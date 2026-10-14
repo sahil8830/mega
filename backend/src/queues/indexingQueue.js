@@ -34,19 +34,23 @@ const POLL_INTERVAL_MS = 5000; // Check MongoDB every 5 seconds
  * The ML service pipeline updates the status directly in MongoDB.
  */
 async function waitForIndexing(videoId) {
-  const deadline = Date.now() + MAX_WAIT_MS;
+  let deadline = Date.now() + MAX_WAIT_MS;
 
-  while (Date.now() < deadline) {
+  while (true) {
     const video = await Video.findById(videoId).select("status");
     if (!video) throw new Error(`Video ${videoId} not found in DB`);
 
     if (video.status === "indexed") return "indexed";
     if (video.status === "failed") throw new Error(`Indexing failed for video ${videoId}`);
 
+    // A polling deadline does not cancel the ML pipeline. Keep observing it
+    // instead of marking it failed and retrying the same indexing work.
+    if (Date.now() >= deadline) {
+      console.warn(`[Indexing Worker] Still waiting for video ${videoId}; current status: ${video.status}`);
+      deadline = Date.now() + MAX_WAIT_MS;
+    }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-
-  throw new Error(`Indexing timed out after ${MAX_WAIT_MS / 60000} minutes for video ${videoId}`);
 }
 
 const worker = new Worker(
@@ -56,7 +60,12 @@ const worker = new Worker(
     console.log(`[Indexing Worker] Starting job ${job.id} for video ${videoId} (user: ${userId})`);
 
     // Mark video as indexing
-    await Video.findByIdAndUpdate(videoId, { status: "indexing" });
+    const video = await Video.findOneAndUpdate(
+      { _id: videoId, status: { $ne: "indexed" } },
+      { $set: { status: "indexing" }, $unset: { errorMessage: "" } },
+    );
+    // A retry may arrive after the original pipeline has already completed.
+    if (!video) return;
 
     // Trigger ML service — pass user_id for per-user FAISS namespacing
     const response = await axios.post(`${ML_SERVICE_URL}/ml/index`, {
@@ -85,10 +94,10 @@ worker.on("failed", (job, err) => {
   console.error(`[Worker] Job ${job?.id} failed:`, err.message);
   // Ensure DB reflects failure if polling threw
   if (job?.data?.videoId) {
-    Video.findByIdAndUpdate(job.data.videoId, {
-      status: "failed",
-      errorMessage: err.message,
-    }).catch(() => {});
+    Video.findOneAndUpdate(
+      { _id: job.data.videoId, status: { $ne: "indexed" } },
+      { $set: { status: "failed", errorMessage: err.message } },
+    ).catch(() => {});
   }
 });
 

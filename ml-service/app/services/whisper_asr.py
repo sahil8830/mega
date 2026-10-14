@@ -6,6 +6,8 @@ Model is loaded once and cached for reuse across pipeline calls.
 """
 import os
 import shutil
+import gc
+import sys
 from functools import lru_cache
 from typing import Dict, List
 
@@ -115,6 +117,28 @@ _mlx_failed = False
 
 def active_whisper_backend() -> str:
     return "pytorch" if _mlx_failed else settings.whisper_backend
+
+
+def release_whisper_model():
+    """Release completed transcription weights before CLIP/OCR use memory.
+
+    Do not import/initialize unused runtimes. The next video loads the same
+    weights and uses the same transcription settings through the usual loader.
+    """
+    get_whisper_model.cache_clear()
+    mlx_transcribe = sys.modules.get("mlx_whisper.transcribe")
+    holder = getattr(mlx_transcribe, "ModelHolder", None)
+    if holder is not None:
+        holder.model = None
+        holder.model_path = None
+    gc.collect()
+    mx = sys.modules.get("mlx.core")
+    if mx is not None and hasattr(mx, "clear_cache"):
+        mx.clear_cache()
+    torch = sys.modules.get("torch")
+    if torch is not None and torch.cuda.is_initialized():
+        torch.cuda.empty_cache()
+    print("[Whisper] Released transcription model before frame processing.")
 
 
 def transcribe_video(video_path: str) -> List[Dict]:

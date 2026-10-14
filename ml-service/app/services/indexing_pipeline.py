@@ -45,8 +45,9 @@ from app.db import get_db
 from app.services.clip_model import encode_images, encode_texts, mean_pool
 from app.services.faiss_manager import get_faiss_manager
 from app.services.ocr_service import extract_text_from_chunk
+from app.services.ocr_runtime import OCRRun
 from app.services.segmentation import ChunkInfo, cleanup_chunk_frames, segment_video
-from app.services.whisper_asr import map_transcript_to_chunks, transcribe_video
+from app.services.whisper_asr import map_transcript_to_chunks, transcribe_video, release_whisper_model
 
 settings = get_settings()
 
@@ -101,6 +102,8 @@ async def run_indexing_pipeline(
         # ── Step 2: Whisper ASR (full video, then map to chunks) ───────────────
         print("[Pipeline] Step 2/5: Whisper transcription...")
         transcript_segments = transcribe_video(video_path)
+        if settings.release_whisper_after_transcription:
+            release_whisper_model()
         chunk_transcripts: Dict[int, str] = map_transcript_to_chunks(
             transcript_segments, chunks
         )
@@ -114,13 +117,15 @@ async def run_indexing_pipeline(
         print(f"[Pipeline] Step 3/5: Processing {len(chunks)} chunks (CLIP + OCR + FAISS + MongoDB)...")
         faiss_mgr = get_faiss_manager(user_id)
         timings = {"clip": 0.0, "ocr": 0.0, "database": 0.0}
-        for offset in range(0, len(chunks), settings.indexing_batch_size):
-            batch = chunks[offset:offset + settings.indexing_batch_size]
-            await _process_batch(batch, chunk_transcripts, video_id, db, faiss_mgr, timings)
-            done = offset + len(batch)
-            print(f"[Pipeline][{video_id}]   -> {done}/{len(chunks)} chunks done "
-                  f"(CLIP {timings['clip']:.1f}s, OCR {timings['ocr']:.1f}s, "
-                  f"database/FAISS {timings['database']:.1f}s)")
+        with OCRRun(settings.ocr_exact_cache_mb * 1024 * 1024) as ocr_run:
+            for offset in range(0, len(chunks), settings.indexing_batch_size):
+                batch = chunks[offset:offset + settings.indexing_batch_size]
+                await _process_batch(batch, chunk_transcripts, video_id, db, faiss_mgr, timings)
+                done = offset + len(batch)
+                print(f"[Pipeline][{video_id}]   -> {done}/{len(chunks)} chunks done "
+                      f"(CLIP {timings['clip']:.1f}s, OCR {timings['ocr']:.1f}s, "
+                      f"database/FAISS {timings['database']:.1f}s)")
+                print(f"[Pipeline][{video_id}] {ocr_run.summary()}")
 
         print(f"[Pipeline]   -> All {len(chunks)} chunks processed")
 
@@ -140,7 +145,7 @@ async def run_indexing_pipeline(
                 "status": "indexed",
                 "duration": duration,
                 "updatedAt": datetime.now(timezone.utc),
-            }},
+            }, "$unset": {"errorMessage": ""}},
         )
 
         stats = faiss_mgr.stats()
@@ -258,4 +263,6 @@ async def _update_video_status(db, video_id: str, status: str, error: str = None
     update = {"$set": {"status": status, "updatedAt": datetime.now(timezone.utc)}}
     if error:
         update["$set"]["errorMessage"] = error
+    elif status in ("indexing", "indexed"):
+        update["$unset"] = {"errorMessage": ""}
     await db["videos"].update_one({"_id": ObjectId(video_id)}, update)

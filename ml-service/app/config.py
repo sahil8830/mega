@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     # Optional ONNX text detector. Preprocessing and recognition remain PaddleOCR.
     ocr_detector_onnx_dir: str = ""
+    ocr_exact_cache_mb: int = Field(16, ge=0)
+    release_whisper_after_transcription: bool = True
 
     # Indexing: batch model calls without reducing temporal/frame sampling.
     chunk_size_seconds: int = Field(7, gt=0)

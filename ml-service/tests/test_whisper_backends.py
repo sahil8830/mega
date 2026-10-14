@@ -1,7 +1,7 @@
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.config import Settings
 from app.services import whisper_asr as asr
@@ -10,6 +10,24 @@ from app.services import whisper_asr as asr
 class WhisperBackendTests(unittest.TestCase):
     def tearDown(self):
         asr._mlx_failed = False
+
+    def test_release_clears_completed_models_without_loading_any(self):
+        holder = SimpleNamespace(model=object(), model_path="same-weights")
+        mx = SimpleNamespace(clear_cache=Mock())
+        cuda = SimpleNamespace(is_initialized=lambda: False, empty_cache=Mock())
+        loader = Mock()
+        with patch.object(asr, "get_whisper_model", loader), \
+             patch.dict(sys.modules, {
+                 "mlx_whisper.transcribe": SimpleNamespace(ModelHolder=holder),
+                 "mlx.core": mx, "torch": SimpleNamespace(cuda=cuda),
+             }):
+            asr.release_whisper_model()
+        loader.assert_not_called()
+        loader.cache_clear.assert_called_once()
+        self.assertIsNone(holder.model)
+        self.assertIsNone(holder.model_path)
+        mx.clear_cache.assert_called_once()
+        cuda.empty_cache.assert_not_called()
 
     def test_backend_selection(self):
         cases = [
