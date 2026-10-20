@@ -1,0 +1,420 @@
+{
+  "feature_directories": {
+    "clip_features": {
+      "files": 12562,
+      "files_with_issues": 0,
+      "issue_counts": {},
+      "arrays": {
+        "features": {
+          "shapes": {
+            "(75, 512)": 12067,
+            "(73, 512)": 32,
+            "(74, 512)": 26,
+            "(67, 512)": 37,
+            "(65, 512)": 35,
+            "(69, 512)": 28,
+            "(66, 512)": 39,
+            "(63, 512)": 36,
+            "(62, 512)": 30,
+            "(71, 512)": 35,
+            "(64, 512)": 34,
+            "(61, 512)": 31,
+            "(60, 512)": 24,
+            "(68, 512)": 42,
+            "(72, 512)": 39,
+            "(70, 512)": 27
+          },
+          "dtypes": {
+            "float16": 12562
+          },
+          "nonfinite_values": 0,
+          "zero_vectors": 0
+        }
+      }
+    },
+    "clip_sub_features": {
+      "files": 329745,
+      "files_with_issues": 0,
+      "issue_counts": {},
+      "arrays": {
+        "last_hidden_state": {
+          "shapes": {
+            "(13, 512)": 10776,
+            "(9, 512)": 49817,
+            "(8, 512)": 27502,
+            "(6, 512)": 11389,
+            "(14, 512)": 5370,
+            "(7, 512)": 14145,
+            "(12, 512)": 28388,
+            "(3, 512)": 10262,
+            "(10, 512)": 67354,
+            "(4, 512)": 9336,
+            "(16, 512)": 3659,
+            "(11, 512)": 56024,
+            "(5, 512)": 13313,
+            "(19, 512)": 3312,
+            "(21, 512)": 1661,
+            "(17, 512)": 3534,
+            "(15, 512)": 3979,
+            "(20, 512)": 2700,
+            "(18, 512)": 3511,
+            "(23, 512)": 610,
+            "(22, 512)": 1008,
+            "(27, 512)": 228,
+            "(29, 512)": 170,
+            "(24, 512)": 413,
+            "(30, 512)": 132,
+            "(26, 512)": 251,
+            "(28, 512)": 196,
+            "(32, 512)": 273,
+            "(25, 512)": 338,
+            "(31, 512)": 94
+          },
+          "dtypes": {
+            "float16": 329745
+          },
+          "nonfinite_values": 0,
+          "zero_vectors": 0
+        },
+        "pooler_output": {
+          "shapes": {
+            "(512,)": 329745
+          },
+          "dtypes": {
+            "float16": 329745
+          },
+          "nonfinite_values": 0,
+          "zero_vectors": 0
+        }
+      }
+    },
+    "clip_text_features": {
+      "files": 10310,
+      "files_with_issues": 0,
+      "issue_counts": {},
+      "arrays": {
+        "last_hidden_state": {
+          "shapes": {
+            "(11, 512)": 1211,
+            "(12, 512)": 1173,
+            "(24, 512)": 66,
+            "(15, 512)": 754,
+            "(9, 512)": 801,
+            "(16, 512)": 682,
+            "(14, 512)": 930,
+            "(19, 512)": 315,
+            "(10, 512)": 1067,
+            "(8, 512)": 476,
+            "(18, 512)": 453,
+            "(17, 512)": 482,
+            "(13, 512)": 985,
+            "(21, 512)": 204,
+            "(27, 512)": 25,
+            "(20, 512)": 209,
+            "(23, 512)": 89,
+            "(22, 512)": 134,
+            "(7, 512)": 112,
+            "(26, 512)": 35,
+            "(6, 512)": 5,
+            "(32, 512)": 15,
+            "(29, 512)": 8,
+            "(28, 512)": 22,
+            "(25, 512)": 46,
+            "(31, 512)": 6,
+            "(30, 512)": 5
+          },
+          "dtypes": {
+            "float16": 10310
+          },
+          "nonfinite_values": 0,
+          "zero_vectors": 0
+        },
+        "pooler_output": {
+          "shapes": {
+            "(512,)": 10310
+          },
+          "dtypes": {
+            "float16": 10310
+          },
+          "nonfinite_values": 0,
+          "zero_vectors": 0
+        }
+      }
+    },
+    "slowfast_features": {
+      "files": 12562,
+      "files_with_issues": 0,
+      "issue_counts": {},
+      "arrays": {
+        "features": {
+          "shapes": {
+            "(75, 2304)": 9811,
+            "(76, 2304)": 2270,
+            "(74, 2304)": 33,
+            "(67, 2304)": 45,
+            "(65, 2304)": 33,
+            "(68, 2304)": 31,
+            "(70, 2304)": 33,
+            "(73, 2304)": 28,
+            "(64, 2304)": 37,
+            "(63, 2304)": 35,
+            "(72, 2304)": 37,
+            "(61, 2304)": 42,
+            "(69, 2304)": 29,
+            "(66, 2304)": 37,
+            "(71, 2304)": 36,
+            "(62, 2304)": 24,
+            "(60, 2304)": 1
+          },
+          "dtypes": {
+            "float16": 12562
+          },
+          "nonfinite_values": 0,
+          "zero_vectors": 0
+        }
+      }
+    }
+  },
+  "splits": {
+    "train": {
+      "queries": 7218,
+      "derived_alignment_verified": true,
+      "mismatched_qids": [],
+      "subtitle_groups": {
+        "with_subtitles": {
+          "queries": 5486,
+          "percent": 76.00443336104183,
+          "unique_video_segments": 5406,
+          "query_word_count": {
+            "min": 4.0,
+            "p25": 8.0,
+            "median": 10.0,
+            "p75": 13.0,
+            "p95": 17.0,
+            "max": 33.0
+          },
+          "window_duration_seconds": {
+            "min": 2.0,
+            "p25": 6.0,
+            "median": 16.0,
+            "p75": 30.0,
+            "p95": 86.0,
+            "max": 150.0
+          },
+          "derived_dominant_labels": {
+            "visual": 27,
+            "speech": 5459,
+            "ocr": 0
+          },
+          "mean_derived_scores_visual_speech_ocr": [
+            0.307323694229126,
+            0.7101301550865173,
+            0.05110369250178337
+          ]
+        },
+        "without_subtitles": {
+          "queries": 1732,
+          "percent": 23.99556663895816,
+          "unique_video_segments": 1694,
+          "query_word_count": {
+            "min": 4.0,
+            "p25": 8.0,
+            "median": 10.0,
+            "p75": 13.0,
+            "p95": 18.0,
+            "max": 44.0
+          },
+          "window_duration_seconds": {
+            "min": 2.0,
+            "p25": 6.0,
+            "median": 18.0,
+            "p75": 32.0,
+            "p95": 94.0,
+            "max": 150.0
+          },
+          "derived_dominant_labels": {
+            "visual": 1732,
+            "speech": 0,
+            "ocr": 0
+          },
+          "mean_derived_scores_visual_speech_ocr": [
+            0.3087705373764038,
+            0.017321016639471054,
+            0.05090981349349022
+          ]
+        }
+      },
+      "video_duration_seconds": {
+        "min": 120.0,
+        "p25": 150.0,
+        "median": 150.0,
+        "p75": 150.0,
+        "p95": 150.0,
+        "max": 150.0
+      },
+      "window_duration_seconds": {
+        "min": 2.0,
+        "p25": 6.0,
+        "median": 16.0,
+        "p75": 30.0,
+        "p95": 88.0,
+        "max": 150.0
+      },
+      "windows_per_query": {
+        "min": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 2.0,
+        "p95": 5.0,
+        "max": 24.0
+      },
+      "queries_per_video_segment": {
+        "min": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 2.0
+      },
+      "subtitle_files_per_annotated_video_segment": {
+        "min": 0.0,
+        "p25": 2.0,
+        "median": 33.0,
+        "p75": 53.0,
+        "p95": 74.0,
+        "max": 561.0
+      },
+      "saliency_rating_counts": {
+        "4": 194586,
+        "3": 147642,
+        "2": 88925,
+        "1": 34972,
+        "0": 15594
+      }
+    },
+    "val": {
+      "queries": 1550,
+      "derived_alignment_verified": true,
+      "mismatched_qids": [],
+      "subtitle_groups": {
+        "with_subtitles": {
+          "queries": 1212,
+          "percent": 78.19354838709677,
+          "unique_video_segments": 1189,
+          "query_word_count": {
+            "min": 4.0,
+            "p25": 7.0,
+            "median": 10.0,
+            "p75": 13.0,
+            "p95": 18.0,
+            "max": 45.0
+          },
+          "window_duration_seconds": {
+            "min": 2.0,
+            "p25": 6.0,
+            "median": 16.0,
+            "p75": 28.0,
+            "p95": 74.0,
+            "max": 150.0
+          },
+          "derived_dominant_labels": {
+            "visual": 6,
+            "speech": 1206,
+            "ocr": 0
+          },
+          "mean_derived_scores_visual_speech_ocr": [
+            0.3058438301086426,
+            0.7106719613075256,
+            0.050927698612213135
+          ]
+        },
+        "without_subtitles": {
+          "queries": 338,
+          "percent": 21.806451612903224,
+          "unique_video_segments": 330,
+          "query_word_count": {
+            "min": 5.0,
+            "p25": 7.0,
+            "median": 9.0,
+            "p75": 12.0,
+            "p95": 18.0,
+            "max": 29.0
+          },
+          "window_duration_seconds": {
+            "min": 2.0,
+            "p25": 4.0,
+            "median": 16.0,
+            "p75": 28.0,
+            "p95": 82.0,
+            "max": 150.0
+          },
+          "derived_dominant_labels": {
+            "visual": 337,
+            "speech": 1,
+            "ocr": 0
+          },
+          "mean_derived_scores_visual_speech_ocr": [
+            0.30899062752723694,
+            0.013683431781828403,
+            0.0504438690841198
+          ]
+        }
+      },
+      "video_duration_seconds": {
+        "min": 120.0,
+        "p25": 150.0,
+        "median": 150.0,
+        "p75": 150.0,
+        "p95": 150.0,
+        "max": 150.0
+      },
+      "window_duration_seconds": {
+        "min": 2.0,
+        "p25": 6.0,
+        "median": 16.0,
+        "p75": 28.0,
+        "p95": 74.0,
+        "max": 150.0
+      },
+      "windows_per_query": {
+        "min": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 2.0,
+        "p95": 5.0,
+        "max": 25.0
+      },
+      "queries_per_video_segment": {
+        "min": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 2.0
+      },
+      "subtitle_files_per_annotated_video_segment": {
+        "min": 0.0,
+        "p25": 11.0,
+        "median": 34.0,
+        "p75": 53.0,
+        "p95": 75.0,
+        "max": 543.0
+      },
+      "saliency_rating_counts": {
+        "1": 7859,
+        "2": 18517,
+        "3": 29268,
+        "4": 38381,
+        "0": 3622
+      }
+    }
+  },
+  "limitations": [
+    "Integrity checks cover every NPZ in the four source feature directories.",
+    "Subtitle absence means no matching feature file, not proven absence of speech.",
+    "Derived-array alignment is checked against normalized query embeddings in annotation order; duplicate query text can still be ambiguous.",
+    "Labels are generated proxies, not independently annotated modality importance.",
+    "Saliency counts count individual ratings on annotated relevant clips, not all video clips."
+  ],
+  "elapsed_seconds": 97.64
+}

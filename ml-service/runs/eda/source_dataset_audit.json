@@ -1,0 +1,340 @@
+{
+  "source": "/Users/shiro/Desktop/Mega/mega/moment_detr/features",
+  "feature_inventory": {
+    "clip_features": {
+      "npz_files": 12562,
+      "sampled_archives": [
+        {
+          "file": "--a6qL3eL0c_210.0_360.0.npz",
+          "arrays": {
+            "features": {
+              "shape": [
+                75,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "--a6qL3eL0c_360.0_510.0.npz",
+          "arrays": {
+            "features": {
+              "shape": [
+                75,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "--a6qL3eL0c_510.0_660.0.npz",
+          "arrays": {
+            "features": {
+              "shape": [
+                75,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        }
+      ]
+    },
+    "clip_sub_features": {
+      "npz_files": 329745,
+      "sampled_archives": [
+        {
+          "file": "qid--a6qL3eL0c_210.0_360.0_subs0.npz",
+          "arrays": {
+            "last_hidden_state": {
+              "shape": [
+                13,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            },
+            "pooler_output": {
+              "shape": [
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "qid--a6qL3eL0c_210.0_360.0_subs1.npz",
+          "arrays": {
+            "last_hidden_state": {
+              "shape": [
+                9,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            },
+            "pooler_output": {
+              "shape": [
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "qid--a6qL3eL0c_210.0_360.0_subs2.npz",
+          "arrays": {
+            "last_hidden_state": {
+              "shape": [
+                9,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            },
+            "pooler_output": {
+              "shape": [
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        }
+      ]
+    },
+    "clip_text_features": {
+      "npz_files": 10310,
+      "sampled_archives": [
+        {
+          "file": "qid0.npz",
+          "arrays": {
+            "last_hidden_state": {
+              "shape": [
+                11,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            },
+            "pooler_output": {
+              "shape": [
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "qid1.npz",
+          "arrays": {
+            "last_hidden_state": {
+              "shape": [
+                12,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            },
+            "pooler_output": {
+              "shape": [
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "qid10.npz",
+          "arrays": {
+            "last_hidden_state": {
+              "shape": [
+                12,
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            },
+            "pooler_output": {
+              "shape": [
+                512
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        }
+      ]
+    },
+    "slowfast_features": {
+      "npz_files": 12562,
+      "sampled_archives": [
+        {
+          "file": "--a6qL3eL0c_210.0_360.0.npz",
+          "arrays": {
+            "features": {
+              "shape": [
+                75,
+                2304
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "--a6qL3eL0c_360.0_510.0.npz",
+          "arrays": {
+            "features": {
+              "shape": [
+                75,
+                2304
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        },
+        {
+          "file": "--a6qL3eL0c_510.0_660.0.npz",
+          "arrays": {
+            "features": {
+              "shape": [
+                75,
+                2304
+              ],
+              "dtype": "float16",
+              "nonfinite_values": 0
+            }
+          }
+        }
+      ]
+    }
+  },
+  "splits": {
+    "train": {
+      "queries": 7218,
+      "unique_video_segments": 7100,
+      "unique_source_video_ids": 2214,
+      "annotation_fields": [
+        "duration",
+        "qid",
+        "query",
+        "relevant_clip_ids",
+        "relevant_windows",
+        "saliency_scores",
+        "vid"
+      ],
+      "duplicate_qids": 0,
+      "repeated_normalized_queries_beyond_first": 37,
+      "empty_queries": 0,
+      "invalid_windows": 0,
+      "empty_window_lists": 0,
+      "saliency_length_mismatches": 0,
+      "duration_seconds": {
+        "min": 120.0,
+        "median": 150.0,
+        "max": 150.0
+      },
+      "window_seconds": {
+        "min": 2.0,
+        "median": 16.0,
+        "max": 150.0
+      },
+      "saliency_rating_counts": {
+        "0": 15594,
+        "1": 34972,
+        "2": 88925,
+        "3": 147642,
+        "4": 194586
+      },
+      "missing_clip_visual_queries": 0,
+      "missing_slowfast_queries": 0,
+      "missing_query_features": 0,
+      "queries_without_subtitle_files": 1732
+    },
+    "val": {
+      "queries": 1550,
+      "unique_video_segments": 1519,
+      "unique_source_video_ids": 474,
+      "annotation_fields": [
+        "duration",
+        "qid",
+        "query",
+        "relevant_clip_ids",
+        "relevant_windows",
+        "saliency_scores",
+        "vid"
+      ],
+      "duplicate_qids": 0,
+      "repeated_normalized_queries_beyond_first": 4,
+      "empty_queries": 0,
+      "invalid_windows": 0,
+      "empty_window_lists": 0,
+      "saliency_length_mismatches": 0,
+      "duration_seconds": {
+        "min": 120.0,
+        "median": 150.0,
+        "max": 150.0
+      },
+      "window_seconds": {
+        "min": 2.0,
+        "median": 16.0,
+        "max": 150.0
+      },
+      "saliency_rating_counts": {
+        "0": 3622,
+        "1": 7859,
+        "2": 18517,
+        "3": 29268,
+        "4": 38381
+      },
+      "missing_clip_visual_queries": 0,
+      "missing_slowfast_queries": 0,
+      "missing_query_features": 0,
+      "queries_without_subtitle_files": 338
+    }
+  },
+  "train_val_overlap": {
+    "qid": 0,
+    "video_segment": 0,
+    "source_video": 0,
+    "normalized_query": 11
+  },
+  "limitations": [
+    "The initial inventory sampled three archives per directory; full_numerical_scan records the later scan of every archive.",
+    "Source annotations provide temporal windows and saliency, not visual/speech/OCR class labels.",
+    "Feature directory counts include files outside the local train/validation annotation coverage.",
+    "Source video identity inferred by removing the final two underscore-separated timestamp fields."
+  ],
+  "full_numerical_scan": {
+    "status": "complete",
+    "report": "full_source_scan.json",
+    "summary": "SOURCE_EDA.md",
+    "files_scanned": 365179,
+    "files_with_issues": 0
+  },
+  "modality_label_audit": {
+    "status": "codex_query_intent_review_complete; independent_video_evidence_review_pending",
+    "sheet": "modality_label_audit.tsv",
+    "instructions": "MODALITY_LABEL_AUDIT.md",
+    "codex_review": "modality_label_audit_codex.tsv",
+    "codex_review_results": "modality_label_audit_codex_results.json",
+    "rows": 100,
+    "scope": "query intent; full video-evidence audit requires raw videos"
+  },
+  "balancing_decision": {
+    "status": "do_not_balance_current_proxy_labels",
+    "report": "BALANCING_DECISION.md",
+    "native_validation_baseline": "moment_detr_validation_baseline.json"
+  }
+}

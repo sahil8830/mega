@@ -1,0 +1,68 @@
+{
+  "total_rows": 100,
+  "completed_rows": 100,
+  "reviewer_types": {
+    "codex_query_intent_review": 100
+  },
+  "review_label_counts": {
+    "visual": 51,
+    "ocr": 3,
+    "mixed": 24,
+    "speech": 22
+  },
+  "exact_agreement_all_labels": 0.4,
+  "three_class_accuracy": 0.5263157894736842,
+  "macro_f1": 0.3075136245867953,
+  "per_class": {
+    "visual": {
+      "support": 51,
+      "precision": 0.55,
+      "recall": 0.43137254901960786,
+      "f1": 0.4835164835164835
+    },
+    "speech": {
+      "support": 22,
+      "precision": 0.3,
+      "recall": 0.8181818181818182,
+      "f1": 0.43902439024390244
+    },
+    "ocr": {
+      "support": 3,
+      "precision": null,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  },
+  "confusion_matrix": {
+    "visual": {
+      "visual": 22,
+      "speech": 29,
+      "ocr": 0
+    },
+    "speech": {
+      "visual": 4,
+      "speech": 18,
+      "ocr": 0
+    },
+    "ocr": {
+      "visual": 0,
+      "speech": 3,
+      "ocr": 0
+    },
+    "mixed": {
+      "visual": 14,
+      "speech": 10,
+      "ocr": 0
+    },
+    "unclear": {
+      "visual": 0,
+      "speech": 0,
+      "ocr": 0
+    }
+  },
+  "agreement_by_subtitle_status": {
+    "with_subtitles": 0.3,
+    "without_subtitles": 0.55
+  },
+  "note": "Mixed and unclear rows are excluded from three-class accuracy and macro F1."
+}

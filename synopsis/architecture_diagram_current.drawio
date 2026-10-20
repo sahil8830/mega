@@ -1,0 +1,148 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" type="device">
+  <diagram id="mega-current" name="MEGA Architecture">
+    <mxGraphModel dx="1400" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1560" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="off" value="" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#eef6f8;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;strokeColor=#c7dce2;">
+          <mxGeometry as="geometry" x="30" y="200" width="560" height="1140" />
+        </mxCell>
+        <mxCell id="on" value="" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#fbf5ec;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;strokeColor=#e7d7bd;">
+          <mxGeometry as="geometry" x="650" y="200" width="720" height="1140" />
+        </mxCell>
+        <mxCell id="title" value="MEGA | Multimodal Video Search" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;fontColor=#193044;fontSize=30;fontStyle=1;">
+          <mxGeometry as="geometry" x="30" y="20" width="1340" height="60" />
+        </mxCell>
+        <mxCell id="app" value="React interface → Express API → FastAPI ML service&#10;Authenticated uploads and searches • MongoDB metadata and search history" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#233d53;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="50" y="100" width="1300" height="75" />
+        </mxCell>
+        <mxCell id="oh" value="OFFLINE • INDEX EACH VIDEO" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;fontColor=#155d70;fontStyle=1;fontSize=20;">
+          <mxGeometry as="geometry" x="60" y="210" width="500" height="50" />
+        </mxCell>
+        <mxCell id="nh" value="ONLINE • SEARCH EACH QUERY" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;fontColor=#805020;fontStyle=1;fontSize=20;">
+          <mxGeometry as="geometry" x="680" y="210" width="660" height="50" />
+        </mxCell>
+        <mxCell id="upload" value="Video upload + indexing queue&#10;BullMQ / Redis • background processing" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="90" y="280" width="440" height="70" />
+        </mxCell>
+        <mxCell id="segment" value="Temporal segmentation&#10;7-second chunks • 3-second overlap&#10;4 representative frames per chunk" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="90" y="390" width="440" height="90" />
+        </mxCell>
+        <mxCell id="asr" value="Whisper speech transcription&#10;Transcribe the whole video once&#10;Map timestamped speech to chunks" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="90" y="520" width="440" height="90" />
+        </mxCell>
+        <mxCell id="visual" value="Visual features&#10;OpenCLIP frame embeddings&#10;Mean pooling per chunk" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="55" y="660" width="240" height="100" />
+        </mxCell>
+        <mxCell id="text" value="Text evidence&#10;Whisper transcript&#10;PaddleOCR on sampled frames" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="325" y="660" width="240" height="100" />
+        </mxCell>
+        <mxCell id="embedding" value="Text embeddings&#10;CLIP encodes speech and OCR text" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="325" y="800" width="240" height="85" />
+        </mxCell>
+        <mxCell id="storage" value="Persistent multimodal storage&#10;Per-user FAISS: visual / speech / OCR&#10;MongoDB: segments, timestamps, text, metadata" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#233d53;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="70" y="940" width="480" height="110" />
+        </mxCell>
+        <mxCell id="optim" value="INDEXING OPTIMIZATIONS&#10;&#10;Sequential frame decoding&#10;Batched CLIP inference and database writes&#10;Exact OCR reuse within an indexing run&#10;&#10;Ownership and deletion scope checked before ranking." vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;fontColor=#193044;">
+          <mxGeometry as="geometry" x="60" y="1100" width="500" height="190" />
+        </mxCell>
+        <mxCell id="e-upload-segment" value="" edge="1" parent="1" source="upload" target="segment" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-segment-asr" value="" edge="1" parent="1" source="segment" target="asr" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-asr-visual" value="" edge="1" parent="1" source="asr" target="visual" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-asr-text" value="" edge="1" parent="1" source="asr" target="text" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-text-embedding" value="" edge="1" parent="1" source="text" target="embedding" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-visual-storage" value="" edge="1" parent="1" source="visual" target="storage" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-embedding-storage" value="" edge="1" parent="1" source="embedding" target="storage" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="query" value="User query + cache lookup&#10;Redis caches responses and query expansions" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#8b5928;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="280" width="620" height="70" />
+        </mxCell>
+        <mxCell id="prepare" value="Query preparation&#10;Optional Hindi translation • FLAN-T5 variants&#10;K-Means representatives • original query retained" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#8b5928;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="390" width="620" height="90" />
+        </mxCell>
+        <mxCell id="retrieve" value="Candidate retrieval&#10;Parallel visual / speech / OCR FAISS search&#10;Add literal transcript and OCR matches" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#8b5928;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="520" width="620" height="90" />
+        </mxCell>
+        <mxCell id="rescore" value="Rescore against the original query&#10;Score candidates across all three modalities" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#8b5928;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="650" width="620" height="70" />
+        </mxCell>
+        <mxCell id="fusion" value="Hybrid modality-weighted fusion&#10;Query intent + trained MLP • fixed-weight fallback&#10;Blend literal text evidence when available" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#8b5928;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="760" width="620" height="90" />
+        </mxCell>
+        <mxCell id="e-query-prepare" value="" edge="1" parent="1" source="query" target="prepare" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-prepare-retrieve" value="" edge="1" parent="1" source="prepare" target="retrieve" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-retrieve-rescore" value="" edge="1" parent="1" source="retrieve" target="rescore" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-rescore-fusion" value="" edge="1" parent="1" source="rescore" target="fusion" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-storage-retrieve" value="Stored evidence" edge="1" parent="1" source="storage" target="retrieve" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#155d70;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="620" y="995" />
+              <mxPoint x="620" y="565" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="gate" value="Answerable?" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#8b2945;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;shape=rhombus;rounded=0;fontStyle=1;">
+          <mxGeometry as="geometry" x="870" y="890" width="280" height="90" />
+        </mxCell>
+        <mxCell id="empty" value="No relevant result&#10;Empty result list" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#8b2945;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="675" y="1000" width="215" height="65" />
+        </mxCell>
+        <mxCell id="refine" value="Conditional temporal refinement&#10;Sufficient confidence; broad visual matches among top results&#10;Gaussian smoothing + sliding window on stored timeline&#10;Short chunks and speech/OCR matches keep timestamps" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="910" y="1010" width="430" height="115" />
+        </mxCell>
+        <mxCell id="window" value="Result window expansion&#10;At least 15 seconds when duration allows; clamp to video" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="1160" width="620" height="65" />
+        </mxCell>
+        <mxCell id="nms" value="Remove overlapping results&#10;Temporal NMS within each video • return top-K" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#155d70;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="1260" width="620" height="65" />
+        </mxCell>
+        <mxCell id="result" value="Video + timestamps + evidence scores&#10;Per-modality similarities, fusion weights and confidence" vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#233d53;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;">
+          <mxGeometry as="geometry" x="700" y="1370" width="620" height="75" />
+        </mxCell>
+        <mxCell id="e-fusion-gate" value="" edge="1" parent="1" source="fusion" target="gate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-gate-empty" value="No" edge="1" parent="1" source="gate" target="empty" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitX=0;exitY=0.5;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-gate-refine" value="Yes" edge="1" parent="1" source="gate" target="refine" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-refine-window" value="" edge="1" parent="1" source="refine" target="window" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-window-nms" value="" edge="1" parent="1" source="window" target="nms" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="e-nms-result" value="" edge="1" parent="1" source="nms" target="result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#657987;strokeWidth=2;fontSize=14;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="notes" value="IMPLEMENTATION NOTES&#10;Answerability runs after fusion. No standalone QSVideo selection stage.&#10;Expansion can fall back to direct search. A valid full-response cache hit returns early.&#10;This diagram shows the uncached search path; chunk settings shown are defaults." vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#f1f4f7;strokeColor=none;fontColor=#ffffff;fontFamily=Helvetica;fontSize=16;spacing=12;fontColor=#193044;fontSize=14;">
+          <mxGeometry as="geometry" x="60" y="1370" width="570" height="140" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

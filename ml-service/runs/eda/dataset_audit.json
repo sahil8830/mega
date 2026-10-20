@@ -1,0 +1,156 @@
+{
+  "train": {
+    "file": "qvhighlights_train.npz",
+    "sha256": "65417e49d55515147e5d2ffc2db21c5c250f41aec2edc6ac8eb8cf557927560a",
+    "samples": 7218,
+    "arrays": {
+      "query_embs": {
+        "shape": [
+          7218,
+          512
+        ],
+        "dtype": "float32",
+        "nonfinite_values": 0
+      },
+      "modality_scores": {
+        "shape": [
+          7218,
+          3
+        ],
+        "dtype": "float32",
+        "nonfinite_values": 0
+      },
+      "soft_labels": {
+        "shape": [
+          7218,
+          3
+        ],
+        "dtype": "float32",
+        "nonfinite_values": 0
+      }
+    },
+    "classes": {
+      "visual": {
+        "count": 1759,
+        "percent": 24.369631476863397
+      },
+      "speech": {
+        "count": 5459,
+        "percent": 75.6303685231366
+      },
+      "ocr": {
+        "count": 0,
+        "percent": 0.0
+      }
+    },
+    "majority_baseline_accuracy": 0.756303685231366,
+    "invalid_soft_label_rows": 0,
+    "tied_dominant_label_rows": 0,
+    "score_argmax_label_agreement": 1.0,
+    "duplicate_query_embedding_rows_beyond_first": 37,
+    "duplicate_complete_rows_beyond_first": 0,
+    "query_norm_range": [
+      0.9999998211860657,
+      1.0000001192092896
+    ],
+    "score_summary": {
+      "visual": {
+        "min": 0.20026811957359314,
+        "mean": 0.3076708912849426,
+        "max": 0.4640895128250122
+      },
+      "speech": {
+        "min": 0.0,
+        "mean": 0.5438868403434753,
+        "max": 0.95084148645401
+      },
+      "ocr": {
+        "min": 0.05000000074505806,
+        "mean": 0.0510563999414444,
+        "max": 0.25
+      }
+    }
+  },
+  "validation": {
+    "file": "qvhighlights_val.npz",
+    "sha256": "f2dbc4177244835dd531d8bb838603189ade65fc6f3ae7c8d378ec50f62074ce",
+    "samples": 1550,
+    "arrays": {
+      "query_embs": {
+        "shape": [
+          1550,
+          512
+        ],
+        "dtype": "float32",
+        "nonfinite_values": 0
+      },
+      "modality_scores": {
+        "shape": [
+          1550,
+          3
+        ],
+        "dtype": "float32",
+        "nonfinite_values": 0
+      },
+      "soft_labels": {
+        "shape": [
+          1550,
+          3
+        ],
+        "dtype": "float32",
+        "nonfinite_values": 0
+      }
+    },
+    "classes": {
+      "visual": {
+        "count": 343,
+        "percent": 22.129032258064516
+      },
+      "speech": {
+        "count": 1207,
+        "percent": 77.87096774193549
+      },
+      "ocr": {
+        "count": 0,
+        "percent": 0.0
+      }
+    },
+    "majority_baseline_accuracy": 0.7787096774193548,
+    "invalid_soft_label_rows": 0,
+    "tied_dominant_label_rows": 0,
+    "score_argmax_label_agreement": 1.0,
+    "duplicate_query_embedding_rows_beyond_first": 4,
+    "duplicate_complete_rows_beyond_first": 0,
+    "query_norm_range": [
+      0.9999998211860657,
+      1.0000001192092896
+    ],
+    "score_summary": {
+      "visual": {
+        "min": 0.2080458700656891,
+        "mean": 0.30653005838394165,
+        "max": 0.4271366596221924
+      },
+      "speech": {
+        "min": 0.0,
+        "mean": 0.5586837530136108,
+        "max": 0.9507508873939514
+      },
+      "ocr": {
+        "min": 0.05000000074505806,
+        "mean": 0.05082258582115173,
+        "max": 0.125
+      }
+    }
+  },
+  "shared_exact_query_embeddings": 11,
+  "training_metadata_rows": 200,
+  "limitations": [
+    "Classes are argmax of generated soft labels, not human modality annotations.",
+    "Score inputs also generate labels; agreement is not retrieval accuracy.",
+    "Missing OCR classes cannot be repaired by oversampling absent examples.",
+    "Metadata is incomplete; query/video identity leakage cannot be fully audited.",
+    "Exact embedding matches are a diagnostic, not proof of identity leakage.",
+    "Existing validation was used for checkpoint selection; it is not an independent test set."
+  ]
+}

@@ -98,8 +98,8 @@ def train_epoch(model, criterion, train_loader, optimizer, opt, epoch_i, tb_writ
 
 
 def train(model, criterion, optimizer, lr_scheduler, train_dataset, val_dataset, opt):
-    if opt.device.type == "cuda":
-        logger.info("CUDA enabled.")
+    if opt.device.type in ("cuda", "mps"):
+        logger.info(f"{opt.device.type.upper()} enabled.")
         model.to(opt.device)
 
     tb_writer = SummaryWriter(opt.tensorboard_log_dir)

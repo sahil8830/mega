@@ -33,7 +33,7 @@ class BaseOptions(object):
         parser.add_argument("--results_root", type=str, default="results")
         parser.add_argument("--exp_id", type=str, default=None, help="id of this run, required at training")
         parser.add_argument("--seed", type=int, default=2018, help="random seed")
-        parser.add_argument("--device", type=int, default=0, help="0 cuda, -1 cpu")
+        parser.add_argument("--device", type=str, default="0", help="0 cuda, -1 cpu, mps for Apple Silicon")
         parser.add_argument("--num_workers", type=int, default=4,
                             help="num subprocesses used to load the data, 0: use main process")
         parser.add_argument("--no_pin_memory", action="store_true",
@@ -199,7 +199,10 @@ class BaseOptions(object):
         opt.train_log_filepath = os.path.join(opt.results_dir, self.train_log_filename)
         opt.eval_log_filepath = os.path.join(opt.results_dir, self.eval_log_filename)
         opt.tensorboard_log_dir = os.path.join(opt.results_dir, self.tensorboard_log_dir)
-        opt.device = torch.device("cuda" if opt.device >= 0 else "cpu")
+        if opt.device == "mps":
+            opt.device = torch.device("mps")
+        else:
+            opt.device = torch.device("cuda" if int(opt.device) >= 0 else "cpu")
         opt.pin_memory = not opt.no_pin_memory
 
         opt.use_tef = "tef" in opt.ctx_mode

@@ -1,0 +1,60 @@
+{
+  "total_rows": 100,
+  "completed_rows": 0,
+  "human_label_counts": {},
+  "exact_agreement_all_labels": null,
+  "three_class_accuracy": null,
+  "macro_f1": null,
+  "per_class": {
+    "visual": {
+      "support": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "speech": {
+      "support": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "ocr": {
+      "support": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    }
+  },
+  "confusion_matrix": {
+    "visual": {
+      "visual": 0,
+      "speech": 0,
+      "ocr": 0
+    },
+    "speech": {
+      "visual": 0,
+      "speech": 0,
+      "ocr": 0
+    },
+    "ocr": {
+      "visual": 0,
+      "speech": 0,
+      "ocr": 0
+    },
+    "mixed": {
+      "visual": 0,
+      "speech": 0,
+      "ocr": 0
+    },
+    "unclear": {
+      "visual": 0,
+      "speech": 0,
+      "ocr": 0
+    }
+  },
+  "agreement_by_subtitle_status": {
+    "with_subtitles": null,
+    "without_subtitles": null
+  },
+  "note": "Mixed and unclear rows are excluded from three-class accuracy and macro F1."
+}

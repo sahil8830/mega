@@ -1,0 +1,14 @@
+{
+  "train": {
+    "missing_subtitle_queries": 1732,
+    "speech_fallback_match_count": 1732,
+    "zero_speech_fallback_count": 1494,
+    "note": "Query embedding alignment verified by full_source_scan.json; rerun the full scan if inputs change."
+  },
+  "val": {
+    "missing_subtitle_queries": 338,
+    "speech_fallback_match_count": 338,
+    "zero_speech_fallback_count": 302,
+    "note": "Query embedding alignment verified by full_source_scan.json; rerun the full scan if inputs change."
+  }
+}

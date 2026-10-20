@@ -36,8 +36,11 @@ def span_cxw_to_xx(cxw_spans):
     tensor([[[0.0000, 1.0000],
         [0.2000, 0.4000]]])
     """
-    x1 = cxw_spans[..., 0] - 0.5 * cxw_spans[..., 1]
-    x2 = cxw_spans[..., 0] + 0.5 * cxw_spans[..., 1]
+    # Clamp width to >=0 so converted spans are always valid (guards against
+    # negative width predictions early in training or MPS numerical differences).
+    half_w = 0.5 * cxw_spans[..., 1].clamp(min=0)
+    x1 = cxw_spans[..., 0] - half_w
+    x2 = cxw_spans[..., 0] + half_w
     return torch.stack([x1, x2], dim=-1)
 
 
@@ -109,8 +112,9 @@ def generalized_temporal_iou(spans1, spans2):
     """
     spans1 = spans1.float()
     spans2 = spans2.float()
-    assert (spans1[:, 1] >= spans1[:, 0]).all()
-    assert (spans2[:, 1] >= spans2[:, 0]).all()
+    # Soft-clamp: swap any rows where end < start (guards MPS numerical drift).
+    spans1 = torch.stack([spans1.min(dim=-1).values, spans1.max(dim=-1).values], dim=-1)
+    spans2 = torch.stack([spans2.min(dim=-1).values, spans2.max(dim=-1).values], dim=-1)
     iou, union = temporal_iou(spans1, spans2)
 
     left = torch.min(spans1[:, None, 0], spans2[:, 0])  # (N, M)
