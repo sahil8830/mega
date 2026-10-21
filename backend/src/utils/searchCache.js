@@ -3,12 +3,12 @@
  *
  * Two-level cache for the search pipeline:
  *
- *   Level 1 — GQE cache  (key: gqe:v2:{queryHash})
+ *   Level 1 — GQE cache  (key: gqe:v3:{queryHash})
  *     Stores flan-t5 expansion results + CLIP representative embeddings.
  *     TTL: 7 days.  GQE is pure query → no user dependency.
  *     Savings: 5–30 s → <5 ms on cache hit.
  *
- *   Level 2 — Full search result cache  (key: search:v4:{userId}:{queryHash})
+ *   Level 2 — Full search result cache  (key: search:v6:{userId}:{queryHash})
  *     Stores the complete ranked ML result array.
  *     TTL: 30 min.  Scoped per user (FAISS namespace is per-user).
  *     Savings: 200–500 ms → <5 ms on cache hit.
@@ -46,9 +46,9 @@ function getRedis() {
 }
 
 // ─── Key Helpers ──────────────────────────────────────────────────────────────
-const CACHE_VERSION = "v2";
-// v4 scores the original query, adds text evidence, and preserves real timestamps.
-const SEARCH_CACHE_VERSION = "v4";
+const CACHE_VERSION = "v3";
+// v6 rejects GQE changes to query entities/actions and bypasses old variants.
+const SEARCH_CACHE_VERSION = "v6";
 
 export function queryHash(query) {
   return crypto.createHash("sha256").update(query.trim().toLowerCase()).digest("hex");

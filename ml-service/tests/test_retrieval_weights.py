@@ -10,6 +10,27 @@ from app.services.clip_model import encode_texts
 
 
 class RetrievalWeightTests(unittest.TestCase):
+    def test_penalty_action_beats_commentary_with_real_model(self):
+        # The action has strong frame evidence; the distractor mentions the
+        # same topic in commentary. Exercise the real encoder and checkpoint.
+        rows = {
+            "visual": [("action", .8), ("commentary", .2)],
+            "speech": [("action", .1), ("commentary", .9)],
+            "ocr": [("action", .1), ("commentary", .1)],
+        }
+        def candidates(modality):
+            return [dict(segment_id=sid, score=score) for sid, score in rows[modality]]
+        manager = SimpleNamespace(score_segments=lambda q, ids, modality: candidates(modality))
+        with patch.object(retrieval, "get_faiss_manager", return_value=manager), \
+             patch.object(retrieval, "_multi_query_search_with",
+                          side_effect=lambda mgr, emb, modality, k: candidates(modality)):
+            for query in ("ronaldo going for panelty", "ronaldo going for penalty"):
+                result = retrieval.retrieve(query, use_dynamic_weights=True)
+                self.assertEqual(result["weighting_mode"], "dynamic")
+                self.assertEqual(result["modality"], "visual")
+                self.assertGreater(result["weights"]["visual"], .6)
+                self.assertEqual(result["results"][0]["segment_id"], "action")
+
     def test_real_queries_change_weights_with_identical_scores_and_expansion(self):
         if not weighting_status()["checkpoint_exists"]:
             self.skipTest("Local trained checkpoint is unavailable")

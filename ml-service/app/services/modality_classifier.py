@@ -53,6 +53,21 @@ def _count_matches(query_lower: str, patterns: list) -> int:
     return sum(1 for p in patterns if re.search(p, query_lower))
 
 
+def normalize_search_query(query: str) -> str:
+    """Correct known search typos without fuzzy-rewriting names or other words."""
+    return re.sub(r"\bpanelt(y|ies)\b", r"penalt\1", query, flags=re.IGNORECASE)
+
+
+# Descriptions of visible actions need no explicit 'show' or 'scene' keyword.
+_ACTION_PATTERN = re.compile(
+    r"\b(?:running|jumping|walking|kicking|shooting|scoring|dancing|swimming|"
+    r"driving|throwing|catching|leaping|celebrating)\b|"
+    r"\b(?:going\s+for|taking|takes|preparing\s+for|about\s+to\s+take|"
+    r"scoring|scores|missing|misses|saving|saves)\s+(?:a\s+|the\s+)?"
+    r"(?:penalty|free\s+kick|shot|goal)\b"
+)
+
+
 def classify_modality(query: str) -> Dict:
     """
     Classify a query into the most relevant modality and compute fusion weights.
@@ -66,11 +81,21 @@ def classify_modality(query: str) -> Dict:
     Returns:
         Dict with 'modality', 'weights', 'confidence'.
     """
-    q = query.lower().strip()
+    q = normalize_search_query(query).lower().strip()
 
     visual_score = _count_matches(q, _VISUAL_KEYWORDS)
     speech_score = _count_matches(q, _SPEECH_KEYWORDS)
     ocr_score = _count_matches(q, _OCR_KEYWORDS)
+
+    # Spoken explanations or screen-text requests still take precedence over
+    # the action being discussed (e.g. 'commentator explains the penalty').
+    if _ACTION_PATTERN.search(q) and speech_score == 0 and ocr_score == 0:
+        return {
+            "modality": "visual",
+            "weights": {"visual": 0.9, "speech": 0.05, "ocr": 0.05},
+            "confidence": "explicit_action",
+            "debug_scores": {"visual": visual_score + 1, "speech": 0, "ocr": 0},
+        }
 
     # A "person explaining ..." requests speech; the generic subject should
     # not cancel the explicit action and turn it into a visual query.

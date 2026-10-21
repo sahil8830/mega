@@ -220,7 +220,8 @@ async def search_endpoint(request: SearchRequest):
     videos = await db["videos"].find(video_filter, {"_id": 1, "duration": 1}).to_list(None)
     video_ids = [video["_id"] for video in videos]
     durations = {str(video["_id"]): video.get("duration") for video in videos}
-    search_query = request.translated_query or request.query
+    from app.services.modality_classifier import normalize_search_query
+    search_query = normalize_search_query(request.translated_query or request.query)
     text_candidates = await find_text_candidates(db, search_query, video_ids)
 
     rep_embs = None

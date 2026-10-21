@@ -19,7 +19,7 @@ import numpy as np
 
 from app.services.clip_model import encode_texts
 from app.services.faiss_manager import get_faiss_manager
-from app.services.modality_classifier import classify_modality
+from app.services.modality_classifier import classify_modality, normalize_search_query
 from app.services.text_matching import text_coverage
 
 # Phase 2 baseline equal-weight defaults
@@ -135,6 +135,7 @@ def retrieve(
     # ── Modality classification ───────────────────────────────────────────────
     # When dynamic weights are active the MLP overrides classifier weights,
     # so we still call it (fast) just to get the modality LABEL for the UI.
+    query = normalize_search_query(query)
     modality_info = classify_modality(query)
 
     # Always include the original query. Expansions only propose candidates;

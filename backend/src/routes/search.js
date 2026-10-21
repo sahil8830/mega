@@ -83,7 +83,7 @@ async function resolvePlayableResults(results, userId) {
  */
 router.post("/", protect, async (req, res) => {
   try {
-    const { query, topK = 10, useGqe = true } = req.body;
+    const { query, topK = 5, useGqe = true } = req.body;
 
     if (!query || typeof query !== "string" || query.trim().length === 0) {
       return res.status(400).json({ message: "query is required." });

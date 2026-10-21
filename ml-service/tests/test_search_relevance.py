@@ -16,6 +16,39 @@ from app.routes.search_route import SearchRequest, search_endpoint, _expand_wind
 
 
 class RelevanceTests(unittest.TestCase):
+    def test_gqe_preserves_player_action_and_outcome(self):
+        query = "ronaldo going for panelty"
+        variants = ["Diego costa going for a penalty",
+                    "Ronaldo scores a goal", "Ronaldo misses a penalty",
+                    "Ronaldo preparing for a penalty",
+                    "Ronaldo preparing for a penalty against Diego Costa"]
+        self.assertEqual(_valid_variants(query, variants), [variants[3]])
+
+    def test_gqe_collapses_article_and_inflection_duplicates(self):
+        variants = ["Diego costa outplays and scores goal",
+                    "Diego costa outplayed and scored goal",
+                    "Diego costa outplayed and scored a goal"]
+        self.assertEqual(_valid_variants("Diego Costa scores a goal and outplays", variants),
+                         variants[:1])
+
+    def test_gqe_preserves_negation_and_numbers(self):
+        self.assertEqual(_valid_variants("Ronaldo scores 2 goals",
+                                        ["Ronaldo scores 3 goals", "Ronaldo scores goals"]), [])
+        self.assertEqual(_valid_variants("Ronaldo does not score",
+                                        ["Ronaldo scores"]), [])
+
+    def test_action_intent_preserves_explicit_speech_and_text_requests(self):
+        for query in ("ronaldo going for panelty", "Messi taking a penalty",
+                      "a dog jumping over a fence", "someone swimming"):
+            self.assertEqual(classify_modality(query)["modality"], "visual")
+        for query, expected in (
+            ("commentator explains Ronaldo taking a penalty", "speech"),
+            ("what does the narrator say about someone running", "speech"),
+            ("read subtitle about Ronaldo taking a penalty", "ocr"),
+        ):
+            weights = classify_modality(query)["weights"]
+            self.assertEqual(max(weights, key=weights.get), expected)
+
     def test_explaining_is_speech_even_with_person_subject(self):
         for query in ("person explaining about iOS", "person explaining what is llm"):
             weights = classify_modality(query)["weights"]
@@ -31,7 +64,8 @@ class RelevanceTests(unittest.TestCase):
 
     def test_clustering_always_keeps_original_query(self):
         vectors = np.eye(4, 512, dtype=np.float32)
-        with patch("app.services.query_expander.encode_texts", return_value=vectors):
+        with patch("app.services.query_expander.encode_texts",
+                   side_effect=lambda texts: vectors[:len(texts)]):
             result = _cluster_and_select("what is llm", ["explain llm", "describe llm", "define llm"])
         self.assertEqual(result["representatives"][0], "what is llm")
         np.testing.assert_array_equal(result["representative_embeddings"][0], vectors[0])

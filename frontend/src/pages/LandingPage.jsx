@@ -42,11 +42,6 @@ export default function LandingPage() {
           <motion.div
             variants={stagger} initial="hidden" animate="show"
           >
-            <motion.div className="lhero-tag" variants={fadeUp}>
-              <span className="lhero-dot" aria-hidden="true" />
-              B.Tech Project · WCE Sangli 2026–27
-            </motion.div>
-
             <motion.h1 className="lhero-title" variants={fadeUp}>
               Find the exact moment<br />
               in any video,{' '}

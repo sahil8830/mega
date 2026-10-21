@@ -53,6 +53,8 @@ export default function ResultsPage() {
   const [playbackError, setPlaybackError] = useState('')
 
   const result = state?.result
+    ? { ...state.result, results: (state.result.results ?? []).slice(0, 5) }
+    : undefined
   const query = state?.query
   const active = result?.results?.[activeIdx]
 
@@ -100,7 +102,7 @@ export default function ResultsPage() {
     setRerunLoading(true)
     const toastId = toast.loading('Re-running search…')
     try {
-      const res = await doSearch(query, 10, result?.gqeApplied ?? true)
+      const res = await doSearch(query, 5, result?.gqeApplied ?? true)
       toast.success('Fresh results loaded', { id: toastId })
       navigate('/results', { state: { result: res, query }, replace: true })
     } catch {

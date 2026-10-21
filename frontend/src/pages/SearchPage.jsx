@@ -29,7 +29,7 @@ export default function SearchPage() {
     setError(''); setLoading(true)
     const toastId = toast.loading('Searching across all modalities…')
     try {
-      const result = await search(trimmed, 10, useGqe)
+      const result = await search(trimmed, 5, useGqe)
       toast.success(`Found ${result.results?.length ?? 0} moments`, { id: toastId })
       navigate('/results', { state: { result, query: trimmed } })
     } catch (err) {

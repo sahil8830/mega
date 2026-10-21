@@ -37,7 +37,9 @@ settings = get_settings()
 
 # ─── Prompts ─────────────────────────────────────────────────────────────────
 _EXPANSION_PROMPT = (
-    "Paraphrase this video search query without changing its meaning: {query}"
+    "Rewrite this video search query using different wording. Preserve all names, "
+    "numbers, actions and whether an action is upcoming or completed. Do not add "
+    "people, events or outcomes. Return only the rewritten query: {query}"
 )
 
 N_VARIANTS = 4      # fewer variants = faster CPU inference
@@ -103,16 +105,41 @@ def _translate_to_english(text: str) -> str:
 
 # ─── Core Functions ───────────────────────────────────────────────────────────
 def _query_hash(query: str) -> str:
-    return hashlib.sha256(("validated-v2:" + query.strip().lower()).encode()).hexdigest()
+    return hashlib.sha256(("validated-v3:" + query.strip().lower()).encode()).hexdigest()
+
+
+def _meaning_signature(text: str) -> frozenset:
+    """Conservative content guard, not a general semantic-equivalence model.
+
+    Unknown content (including names) must survive unchanged. Only explicitly
+    equivalent word forms may vary; unsafe candidates fall back to the query.
+    """
+    from app.services.text_matching import query_terms
+    from app.services.modality_classifier import normalize_search_query
+    text = normalize_search_query(text).lower()
+    text = re.sub(r"\b(?:going for|preparing for|about to take)\b", "preparing", text)
+    groups = (
+        ("score", "scores", "scored", "scoring"),
+        ("outplay", "outplays", "outplayed", "outplaying"),
+        ("run", "runs", "running"),
+        ("jump", "jumps", "jumping", "leap", "leaps", "leaping"),
+        ("goal", "goals"), ("penalty", "penalties"),
+    )
+    aliases = {word: group[0] for group in groups for word in group}
+    terms = [aliases.get(word, word) for word in query_terms(text)
+             if word not in {"narrator", "narrators"}]
+    # query_terms omits one-character tokens; numbers must still be preserved.
+    terms.extend(re.findall(r"\b\d+\b", text))
+    return frozenset(terms)
 
 
 def _valid_variants(query: str, variants: List[str]) -> List[str]:
     """Reject generated programs, repetitions and verbose answers before indexing."""
-    from app.services.text_matching import query_terms, term_pattern
-    terms = query_terms(query)
+    signature = _meaning_signature(query)
     max_words = min(40, max(12, len(query.split()) * 2))
     valid = []
     seen = {query.casefold()}
+    seen_wordings = set()
     for variant in variants:
         variant = variant.strip()
         words = variant.lower().split()
@@ -124,8 +151,16 @@ def _valid_variants(query: str, variants: List[str]) -> List[str]:
         trigrams = list(zip(words, words[1:], words[2:]))
         if len(trigrams) != len(set(trigrams)):
             continue
-        if terms and not any(re.search(term_pattern(term), variant, re.IGNORECASE) for term in terms):
+        if _meaning_signature(variant) != signature:
             continue
+        # Article-only and verb-inflection-only changes add no retrieval value.
+        wording = tuple(re.findall(r"\w+", re.sub(r"\b(?:a|an|the)\b", "", variant.lower())))
+        wording = tuple(re.sub(r"^outplay(?:s|ed|ing)$", "outplay",
+                               re.sub(r"^(?:scores|scored|scoring)$", "score", word))
+                        for word in wording)
+        if wording in seen_wordings:
+            continue
+        seen_wordings.add(wording)
         seen.add(variant.casefold())
         valid.append(variant)
     return valid[:N_VARIANTS]
@@ -235,6 +270,9 @@ async def expand_query(query: str) -> Dict:
         print(f"[GQE] Hindi query detected: '{query}'")
         query = _translate_to_english(query)
         print(f"[GQE] Using translated query for search: '{query}'")
+
+    from app.services.modality_classifier import normalize_search_query
+    query = normalize_search_query(query)
 
     q_hash = _query_hash(query)
     db = get_db()

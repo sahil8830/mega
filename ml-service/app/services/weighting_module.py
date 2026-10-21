@@ -79,7 +79,10 @@ def predict_fusion_weights(query_emb: np.ndarray, modality_scores: np.ndarray,
             # Explicit requests to read/speak/show complement ambiguous CLIP
             # semantics. This existing rule-based signal is not a trained label.
             explicit = np.array([info["weights"][name] for name in ("visual", "speech", "ocr")])
-            intent = 0.5 * intent + 0.5 * explicit
+            # Clear action descriptions should not be overturned by generic
+            # semantic prototypes or the checkpoint's speech prior.
+            explicit_share = 0.9 if info.get("confidence") == "explicit_action" else 0.5
+            intent = (1 - explicit_share) * intent + explicit_share * explicit
     return (0.75 * intent + 0.25 * learned).astype(np.float32)
 
 
