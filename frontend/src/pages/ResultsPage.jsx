@@ -194,7 +194,6 @@ export default function ResultsPage() {
                     <span className="ri-rank">#{i + 1}</span>
                     <span className="ri-info">
                       <span className="ri-time">{fmt(r.start_time)} – {fmt(r.end_time)}</span>
-                      <span className="ri-score">{Math.round(r.fused_score * 100)}%</span>
                     </span>
                     {activeIdx === i && (
                       <motion.span
@@ -295,9 +294,6 @@ export default function ResultsPage() {
                       <Eye size={16} style={{ marginRight: 6 }} />
                       Evidence
                     </h2>
-                    <span className="ev-fused">
-                      {Math.round(active.fused_score * 100)}<small>%</small>
-                    </span>
                   </div>
                   <div className="ev-bars">
                     <Bar label="🎬 Visual (CLIP)"    weight={active.modality_weights.visual} score={active.visual_score} color="#a78bfa" />
